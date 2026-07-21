@@ -1,55 +1,113 @@
-# keep-npu
+# KeepNPU
 
-Keep a Huawei Ascend NPU lightly active with periodic `torch_npu` work.
+KeepNPU is a small, polite Huawei Ascend NPU keeper for shared machines. It
+matches KeepGPU's CLI, service, REST/JSON-RPC, MCP, and dashboard workflows,
+using `torch_npu` and `npu-smi` for Ascend devices.
 
-The script allocates a small pair of tensors on the selected NPU and runs a
-tiny matrix multiplication at a fixed interval. This mirrors the common
-keep-GPU-awake pattern while keeping the default workload intentionally low.
+It allocates only when utilization backoff permits, keeps the requested device
+memory signal lightweight, and releases cleanly on exit.
 
 ## Requirements
 
-- Huawei Ascend NPU runtime and CANN environment
-- Python 3.10+
-- PyTorch with `torch_npu`
+- Python 3.9–3.13
+- Huawei Ascend driver and CANN runtime
+- A mutually compatible PyTorch and `torch_npu` installation
 
-Before running, load the Ascend toolkit environment:
+Load the CANN environment before using KeepNPU when your system does not do so
+automatically:
 
-```bash
+```console
 source /usr/local/Ascend/ascend-toolkit/latest/bin/setenv.bash
 ```
 
-## Usage
+## Install
 
-Run with defaults:
-
-```bash
-python keep_npu_alive.py
+```console
+python -m pip install keep-npu
 ```
 
-Use a specific device:
+`torch` and `torch_npu` are deliberately not installed as package dependencies:
+their versions must match the server's CANN and driver stack.
 
-```bash
-python keep_npu_alive.py --device npu:0
-python keep_npu_alive.py --device 0
+To install the latest unreleased revision directly from GitHub:
+
+```console
+python -m pip install 'keep-npu @ git+https://github.com/pzheng460/keep-npu.git'
 ```
 
-Tune the keepalive interval and matrix size:
+## Blocking mode
 
-```bash
-python keep_npu_alive.py --interval 5 --size 256
+Keep all visible NPUs, or select torch-visible ordinals with `--npu-ids`:
+
+```console
+keep-npu --vram 1GiB --interval 60
+keep-npu --npu-ids 0,2 --vram 512MiB --interval 30
 ```
 
-Run one keepalive operation and exit:
+Press `Ctrl+C` to release memory. The default utilization threshold is 25%;
+KeepNPU backs off while a device is busier than that or telemetry is unknown.
+Use `--busy-threshold -1` only when you intentionally want to disable backoff.
 
-```bash
-python keep_npu_alive.py --once
+## Service and dashboard
+
+Run the local HTTP service in the foreground:
+
+```console
+keep-npu serve --host 127.0.0.1 --port 8765
 ```
 
-## Test
+Open `http://127.0.0.1:8765/` for the dashboard. Non-blocking CLI workflows use
+the same service and auto-start it on localhost by default:
 
-The included tests only cover argument parsing and helper behavior, so they do
-not require a real NPU:
-
-```bash
-python -m unittest tests/test_keep_npu_alive.py -v
+```console
+keep-npu list-npus
+keep-npu start --npu-ids 0 --vram 1GiB --interval 60
+keep-npu status
+keep-npu stop --job-id JOB_ID
+keep-npu stop --all
+keep-npu service-stop
 ```
+
+The service exposes `GET /health`, `GET /api/npus`, and session CRUD under
+`/api/sessions`. JSON-RPC is available at the exact `/rpc` endpoint, including
+MCP-shaped `tools/list` and `tools/call` messages. As in KeepGPU 1.0, HTTP mode
+is not a Streamable HTTP MCP endpoint; standards-based MCP transport is stdio.
+
+## MCP server
+
+For a local MCP client using stdio:
+
+```console
+keep-npu-mcp-server --mode stdio
+```
+
+For HTTP transport:
+
+```console
+keep-npu-mcp-server --mode http --host 127.0.0.1 --port 8765
+```
+
+The MCP tools are `start_keep`, `stop_keep`, `status`, and `list_npus`.
+
+## Ascend device semantics
+
+`--npu-ids` always addresses the visible ordinal used by `torch.npu`, after
+`ASCEND_RT_VISIBLE_DEVICES` filtering. `list-npus` additionally reports the
+physical ID when it can be derived safely. Memory comes from `torch.npu` with
+best-effort `npu-smi` telemetry; unavailable values are returned as `null`
+instead of being guessed.
+
+See [KeepGPU compatibility](https://github.com/pzheng460/keep-npu/blob/main/docs/compatibility.md)
+for the exact public-name mapping and intentional Ascend differences.
+
+## Development
+
+```console
+python -m pip install -e '.[dev]'
+PYTHONPATH=src python -m pytest
+cd web/dashboard && npm ci && npm test -- --run && npm run build
+```
+
+Hardware tests use the `ascend` pytest marker and conservative memory sizes.
+The original standalone `keep_npu_alive.py` entry point remains available for
+backward compatibility.
