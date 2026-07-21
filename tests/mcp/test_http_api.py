@@ -245,6 +245,33 @@ def _raw_http_response(httpd, method: str, target: str):
     return _send_raw_http_response(httpd, request)
 
 
+def test_http_rejects_cross_origin_text_plain_state_change():
+    server = make_server()
+    httpd, thread, _base = _start_http_server(server)
+    host, port = httpd.server_address
+    body = b'{}'
+    request = (
+        "POST /api/sessions HTTP/1.1\r\n"
+        f"Host: {host}:{port}\r\n"
+        "Origin: https://attacker.example\r\n"
+        "Content-Type: text/plain\r\n"
+        f"Content-Length: {len(body)}\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode("ascii") + body
+
+    try:
+        status_code, payload = _send_raw_http_json_request(httpd, request)
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status_code in (403, 415)
+    assert "error" in payload
+    assert server.status() == {"active_jobs": []}
+
+
 @pytest.mark.parametrize(
     ("method", "path", "allowed_methods"),
     [

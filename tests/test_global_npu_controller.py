@@ -63,3 +63,28 @@ def test_global_rolls_back_partial_start(monkeypatch):
     assert FakeController.instances[0].release_calls == 1
     assert FakeController.instances[1].release_calls == 1
 
+
+def test_global_rollback_attempts_every_release_when_one_release_fails(monkeypatch):
+    from keep_npu.global_npu_controller import global_npu_controller as module
+
+    class ReleaseFailureController(FakeController):
+        fail_rank = 2
+
+        def release(self):
+            super().release()
+            if self.rank == 1:
+                raise RuntimeError("rank 1 release failed")
+
+    ReleaseFailureController.instances = []
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 3)
+    monkeypatch.setattr(module, "AscendNPUController", ReleaseFailureController)
+    controller = module.GlobalNPUController(npu_ids=[0, 1, 2])
+
+    with pytest.raises(RuntimeError, match="rank 2 failed"):
+        controller.keep()
+
+    assert [item.release_calls for item in ReleaseFailureController.instances] == [
+        1,
+        1,
+        1,
+    ]

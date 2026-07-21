@@ -1359,6 +1359,32 @@ class _JSONRPCHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode("utf-8")
         return strict_json_loads(body)
 
+    def _reject_unsafe_json_request(self) -> bool:
+        raw_content_types = self.headers.get_all("content-type")
+        if raw_content_types is None or len(raw_content_types) != 1:
+            self._json_response(
+                415,
+                {"error": {"message": "Content-Type must be application/json"}},
+            )
+            return True
+        media_type = raw_content_types[0].split(";", 1)[0].strip().lower()
+        if media_type != "application/json":
+            self._json_response(
+                415,
+                {"error": {"message": "Content-Type must be application/json"}},
+            )
+            return True
+        origins = self.headers.get_all("origin")
+        if origins is not None:
+            host = self.headers.get("host")
+            if len(origins) != 1 or host is None or origins[0] != f"http://{host}":
+                self._json_response(
+                    403,
+                    {"error": {"message": "Cross-origin requests are not allowed"}},
+                )
+                return True
+        return False
+
     def _serve_static(self, request_path: str, write_body: bool = True) -> None:
         if request_path in ("/", ""):
             relative = "index.html"
@@ -1587,6 +1613,8 @@ class _JSONRPCHandler(BaseHTTPRequestHandler):
                 return
             if path not in ("/api/sessions", "/", "/rpc"):
                 self._json_response(404, {"error": {"message": "Unknown endpoint"}})
+                return
+            if self._reject_unsafe_json_request():
                 return
 
             server_ref = self.server.keepnpu_server  # type: ignore[attr-defined]

@@ -1341,20 +1341,28 @@ def _run_blocking(
     else:
         logger.info("Busy threshold: %s%%", busy_threshold)
 
-    global_controller = GlobalNPUController(
-        npu_ids=npu_id_list,
-        interval=interval,
-        vram_to_keep=vram,
-        busy_threshold=busy_threshold,
-    )
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
 
-    with global_controller:
-        logger.info("Keeping NPUs awake. Press Ctrl+C to exit.")
+    def request_sigterm_cleanup(_signum, _frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, request_sigterm_cleanup)
+    try:
         try:
-            while True:
-                time.sleep(3600)
+            global_controller = GlobalNPUController(
+                npu_ids=npu_id_list,
+                interval=interval,
+                vram_to_keep=vram,
+                busy_threshold=busy_threshold,
+            )
+            with global_controller:
+                logger.info("Keeping NPUs awake. Press Ctrl+C to exit.")
+                while True:
+                    time.sleep(3600)
         except KeyboardInterrupt:
             logger.info("Interruption received. Releasing NPUs...")
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
 
 
 @app.callback(invoke_without_command=True)

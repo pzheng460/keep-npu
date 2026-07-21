@@ -9,6 +9,7 @@ from keep_npu.single_npu_controller.ascend_npu_controller import (
     AscendNPUController,
 )
 from keep_npu.utilities.humanized_input import parse_vram_to_elements
+from keep_npu.utilities.logger import setup_logger
 from keep_npu.utilities.platform_manager import visible_torch_device_count
 from keep_npu.utilities.session_config import (
     DEFAULT_BUSY_THRESHOLD,
@@ -16,6 +17,8 @@ from keep_npu.utilities.session_config import (
     validate_interval,
     validate_npu_ids,
 )
+
+logger = setup_logger(__name__)
 
 
 class ControllerStartupUnavailable(Exception):
@@ -76,12 +79,18 @@ class GlobalNPUController:
         for controller in self.controllers:
             try:
                 controller.keep()
-            except Exception:
-                try:
-                    controller.release()
-                finally:
-                    for previous in reversed(started):
-                        previous.release()
+            except BaseException:
+                rollback_errors = []
+                for candidate in [controller, *reversed(started)]:
+                    try:
+                        candidate.release()
+                    except Exception as release_exc:
+                        rollback_errors.append((candidate.rank, release_exc))
+                if rollback_errors:
+                    detail = "; ".join(
+                        f"rank {rank}: {exc}" for rank, exc in rollback_errors
+                    )
+                    logger.error("NPU startup rollback release failures: %s", detail)
                 raise
             started.append(controller)
 

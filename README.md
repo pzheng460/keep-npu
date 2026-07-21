@@ -63,8 +63,9 @@ keep-npu service-stop
 ```
 
 The service exposes `GET /health`, `GET /api/npus`, and session CRUD under
-`/api/sessions`. JSON-RPC is available at `/rpc` and the Streamable HTTP MCP
-endpoint at `/mcp`.
+`/api/sessions`. JSON-RPC is available at the exact `/rpc` endpoint, including
+MCP-shaped `tools/list` and `tools/call` messages. As in KeepGPU 1.0, HTTP mode
+is not a Streamable HTTP MCP endpoint; standards-based MCP transport is stdio.
 
 ## MCP server
 
@@ -90,8 +91,8 @@ physical ID when it can be derived safely. Memory comes from `torch.npu` with
 best-effort `npu-smi` telemetry; unavailable values are returned as `null`
 instead of being guessed.
 
-See [KeepGPU compatibility](docs/compatibility.md) for the exact public-name
-mapping and intentional Ascend differences.
+See [KeepGPU compatibility](https://github.com/pzheng460/keep-npu/blob/main/docs/compatibility.md)
+for the exact public-name mapping and intentional Ascend differences.
 
 ## Development
 

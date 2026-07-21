@@ -32,6 +32,27 @@ class KeepNpuAliveTests(unittest.TestCase):
                 with self.assertRaises(argparse.ArgumentTypeError):
                     keep_npu_alive.positive_float(value)
 
+    def test_legacy_config_translates_to_global_controller_parameters(self):
+        config = keep_npu_alive.KeepAliveConfig(
+            device="npu:2",
+            interval=5.0,
+            size=256,
+            dtype_name="float16",
+            log_every=12,
+            warmup=3,
+            once=False,
+        )
+
+        self.assertEqual(
+            keep_npu_alive.controller_kwargs(config),
+            {
+                "npu_ids": [2],
+                "interval": 5.0,
+                "vram_to_keep": 256 * 256 * 2 * 3,
+                "busy_threshold": -1,
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

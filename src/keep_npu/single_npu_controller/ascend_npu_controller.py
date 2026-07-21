@@ -31,7 +31,7 @@ class AscendNPUController(BaseNPUController):
         *,
         rank: int,
         interval: float = 1.0,
-        iterations: int = 5000,
+        iterations: int = 1,
         vram_to_keep: str | int = "1GiB",
         busy_threshold: int = DEFAULT_BUSY_THRESHOLD,
     ):
@@ -224,4 +224,3 @@ class AscendNPUController(BaseNPUController):
 
     def __exit__(self, exc_type, exc, tb):
         self.release()
-

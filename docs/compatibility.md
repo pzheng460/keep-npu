@@ -27,6 +27,8 @@ Intentional backend differences:
   treats telemetry as best effort and returns nullable metrics when a value
   cannot be established safely.
 - KeepNPU allocates float32 chunks and performs small in-place ReLU operations;
-  it does not assume CUDA-specific allocator or stream APIs.
+  it does not assume CUDA-specific allocator or stream APIs. Ascend defaults to
+  one pass over the allocation per interval because KeepGPU's 5,000-pass GPU
+  default would generate roughly 10 TiB of memory traffic for a 1 GiB target.
 - Hardware/vendor setup is not declared as a PyPI dependency because PyTorch,
   `torch_npu`, CANN, and the driver must be installed as a compatible set.

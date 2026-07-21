@@ -183,6 +183,48 @@ def test_run_blocking_preserves_ascend_visible_devices_for_npu_ids(monkeypatch):
     }
 
 
+def test_run_blocking_installs_and_restores_sigterm_handler(monkeypatch):
+    captured = {"signal_calls": []}
+
+    class DummyGlobalController:
+        def __init__(self, **_kwargs):
+            assert captured["signal_calls"], "SIGTERM must be handled during startup"
+
+        def __enter__(self):
+            captured["entered"] = True
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            captured["exited"] = True
+
+    import keep_npu.global_npu_controller.global_npu_controller as global_module
+
+    previous_handler = object()
+
+    def fake_getsignal(signum):
+        assert signum == cli.signal.SIGTERM
+        return previous_handler
+
+    def fake_signal(signum, handler):
+        captured["signal_calls"].append((signum, handler))
+
+    def terminate_sleep(_seconds):
+        installed = captured["signal_calls"][0][1]
+        installed(cli.signal.SIGTERM, None)
+
+    monkeypatch.setattr(global_module, "GlobalNPUController", DummyGlobalController)
+    monkeypatch.setattr(cli.signal, "getsignal", fake_getsignal)
+    monkeypatch.setattr(cli.signal, "signal", fake_signal)
+    monkeypatch.setattr(cli.time, "sleep", terminate_sleep)
+
+    cli._run_blocking(1, "0", "1MiB", None, -1)
+
+    assert captured["entered"] is True
+    assert captured["exited"] is True
+    assert captured["signal_calls"][0][0] == cli.signal.SIGTERM
+    assert captured["signal_calls"][-1] == (cli.signal.SIGTERM, previous_handler)
+
+
 def test_run_blocking_defers_omitted_npu_enumeration_to_global_controller(
     monkeypatch,
 ):

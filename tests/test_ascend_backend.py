@@ -94,6 +94,18 @@ def test_controller_rejects_invalid_rank_before_backend_probe(monkeypatch):
         module.AscendNPUController(rank="0", vram_to_keep=4)
 
 
+def test_controller_default_workload_is_one_lightweight_pass(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+
+    controller = module.AscendNPUController(rank=0, vram_to_keep=4)
+
+    assert controller.iterations == 1
+
+
 def test_controller_unknown_utilization_defers_allocation(monkeypatch):
     from keep_npu.single_npu_controller import ascend_npu_controller as module
 
@@ -180,4 +192,3 @@ def test_controller_rejects_retry_while_worker_is_stopping(monkeypatch):
 
     with pytest.raises(RuntimeError, match="startup did not complete"):
         controller.keep()
-

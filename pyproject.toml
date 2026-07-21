@@ -30,6 +30,7 @@ dependencies = [
 [project.scripts]
 keep-npu = "keep_npu.cli:app"
 keep-npu-mcp-server = "keep_npu.mcp.server:main"
+keep-npu-alive = "keep_npu.legacy:main"
 
 [project.optional-dependencies]
 dev = [
