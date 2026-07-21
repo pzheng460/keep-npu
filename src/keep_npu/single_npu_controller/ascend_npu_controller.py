@@ -31,6 +31,7 @@ from keep_npu.utilities.session_config import (
 
 logger = setup_logger(__name__)
 MAX_CHUNK_ELEMENTS = 1 << 30
+VECTOR_SYNC_INTERVAL = 32
 
 
 @dataclass
@@ -241,12 +242,18 @@ class AscendNPUController(BaseNPUController):
 
     def _run_vector_batch(self, tensors: List[Any]) -> None:
         started = time.monotonic()
+        pending_iterations = 0
         for _ in range(self.iterations):
             for tensor in tensors:
                 self._torch.relu_(tensor)
+            pending_iterations += 1
+            if pending_iterations >= VECTOR_SYNC_INTERVAL:
+                self._torch.npu.synchronize()
+                pending_iterations = 0
             if self._stop_evt is not None and self._stop_evt.is_set():
                 break
-        self._torch.npu.synchronize()
+        if pending_iterations:
+            self._torch.npu.synchronize()
         logger.debug(
             "rank %s: keepalive batch completed in %.2f ms",
             self.rank,

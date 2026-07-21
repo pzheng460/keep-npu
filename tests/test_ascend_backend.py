@@ -262,6 +262,26 @@ def test_unconditional_mode_does_not_sleep_between_compute_batches(monkeypatch):
     assert stop_evt.wait_calls == []
 
 
+def test_vector_batch_synchronizes_in_bounded_chunks(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    controller = module.AscendNPUController(
+        rank=0,
+        iterations=65,
+        vram_to_keep=4,
+        workload="vector",
+    )
+    controller._stop_evt = threading.Event()
+
+    controller._run_vector_batch([{"tensor": 0}])
+
+    assert fake.relu_calls == 65
+    assert fake.npu.sync_calls == 3
+
+
 def test_controller_surfaces_startup_device_failure(monkeypatch):
     from keep_npu.single_npu_controller import ascend_npu_controller as module
 
