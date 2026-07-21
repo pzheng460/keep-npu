@@ -15,6 +15,7 @@ from keep_npu.utilities.session_config import (
     validate_npu_ids,
     validate_rank_type,
     validate_visible_rank,
+    validate_workload,
 )
 
 
@@ -172,6 +173,17 @@ def test_validate_busy_threshold_rejects_non_plain_integers(value):
         ValueError, match="busy_threshold must be -1 or an integer between 0 and 100"
     ):
         validate_busy_threshold(value)
+
+
+def test_validate_workload_accepts_public_values():
+    assert validate_workload("aicore") == "aicore"
+    assert validate_workload("vector") == "vector"
+
+
+@pytest.mark.parametrize("value", [None, "", "AICORE", "relu", 1, True, [], {}])
+def test_validate_workload_rejects_noncanonical_values(value):
+    with pytest.raises(ValueError, match="workload must be 'aicore' or 'vector'"):
+        validate_workload(value)
 
 
 @pytest.mark.parametrize(

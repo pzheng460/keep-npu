@@ -19,6 +19,7 @@ from urllib.request import Request, urlopen
 import typer
 from rich.console import Console
 
+from keep_npu.single_npu_controller.workload import validate_workload_vram
 from keep_npu.utilities.endpoint_validation import (
     validate_endpoint,
     validate_endpoint_host,
@@ -29,6 +30,7 @@ from keep_npu.utilities.json_protocol import strict_json_loads
 from keep_npu.utilities.logger import setup_logger
 from keep_npu.utilities.session_config import (
     DEFAULT_BUSY_THRESHOLD,
+    DEFAULT_WORKLOAD,
     is_memory_byte_or_none,
     is_memory_byte_pair_or_none,
     is_utilization_percent_or_none,
@@ -36,6 +38,7 @@ from keep_npu.utilities.session_config import (
     validate_interval,
     validate_job_id,
     validate_npu_ids,
+    validate_workload,
 )
 
 DEFAULT_SERVICE_HOST = "127.0.0.1"
@@ -56,6 +59,7 @@ ROOT_BLOCKING_OPTION_LABELS = {
     "vram": "--vram",
     "legacy_threshold": "--threshold",
     "busy_threshold": "--busy-threshold/--util-threshold",
+    "workload": "--workload",
     "interval": "--interval",
 }
 JSON_OUTPUT_SERVICE_COMMANDS = {"status", "stop", "list-npus"}
@@ -512,6 +516,21 @@ def _validate_cli_busy_threshold(busy_threshold: Any) -> int:
         return validate_busy_threshold(busy_threshold)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+
+
+def _validate_cli_workload(workload: Any) -> str:
+    try:
+        return validate_workload(workload)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+def _validate_cli_workload_vram(workload: Any, vram: str) -> str:
+    try:
+        validate_workload_vram(workload, vram)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    return vram
 
 
 def _validate_cli_job_id(job_id: Optional[str]) -> Optional[str]:
@@ -1009,6 +1028,7 @@ def _validate_status_params(params: Dict[str, Any], method: str, prefix: str) ->
         "interval": validate_interval,
         "busy_threshold": validate_busy_threshold,
         "vram": parse_vram_to_elements,
+        "workload": validate_workload,
     }
     for field, validator in validators.items():
         if field not in params:
@@ -1307,6 +1327,7 @@ def _run_blocking(
     vram: str,
     legacy_threshold: Optional[str],
     busy_threshold: Union[int, str],
+    workload: str = DEFAULT_WORKLOAD,
 ) -> None:
     vram, busy_threshold, legacy_mode = _apply_legacy_threshold(
         vram, legacy_threshold, busy_threshold
@@ -1322,6 +1343,8 @@ def _run_blocking(
             "[yellow]`--threshold` for utilization is deprecated; use `--busy-threshold`.[/yellow]"
         )
     busy_threshold = _validate_cli_busy_threshold(busy_threshold)
+    workload = _validate_cli_workload(workload)
+    _validate_cli_workload_vram(workload, vram)
 
     npu_id_list = _parse_npu_ids(npu_ids)
 
@@ -1336,6 +1359,7 @@ def _run_blocking(
 
     logger.info("VRAM to keep occupied: %s", vram)
     logger.info("Check interval: %s seconds", interval)
+    logger.info("Workload: %s", workload)
     if busy_threshold == -1:
         logger.info("Busy threshold: unconditional (utilization backoff disabled)")
     else:
@@ -1354,6 +1378,7 @@ def _run_blocking(
                 interval=interval,
                 vram_to_keep=vram,
                 busy_threshold=busy_threshold,
+                workload=workload,
             )
             with global_controller:
                 logger.info("Keeping NPUs awake. Press Ctrl+C to exit.")
@@ -1399,6 +1424,11 @@ def main(
             "(blocking mode)."
         ),
     ),
+    workload: str = typer.Option(
+        DEFAULT_WORKLOAD,
+        "--workload",
+        help="Keepalive workload: aicore (default, drives nputop UTL) or vector.",
+    ),
 ):
     """Run blocking keep-alive mode when no subcommand is provided."""
     try:
@@ -1407,13 +1437,22 @@ def main(
             return
         interval = _validate_cli_interval(interval)
         busy_threshold = _validate_cli_busy_threshold(busy_threshold)
+        workload = _validate_cli_workload(workload)
         _parse_npu_ids(npu_ids)
         legacy_vram, legacy_busy_threshold, _ = _apply_legacy_threshold(
             vram, legacy_threshold, busy_threshold
         )
         _validate_cli_vram(legacy_vram)
+        _validate_cli_workload_vram(workload, legacy_vram)
         _validate_cli_busy_threshold(legacy_busy_threshold)
-        _run_blocking(interval, npu_ids, vram, legacy_threshold, busy_threshold)
+        _run_blocking(
+            interval,
+            npu_ids,
+            vram,
+            legacy_threshold,
+            busy_threshold,
+            workload,
+        )
     except typer.BadParameter as exc:
         if _subcommand_outputs_machine_json(ctx):
             _print_machine_json({"error": str(exc)})
@@ -1473,6 +1512,11 @@ def start(
             "or telemetry is unavailable; -1 disables utilization backoff."
         ),
     ),
+    workload: str = typer.Option(
+        DEFAULT_WORKLOAD,
+        "--workload",
+        help="Keepalive workload: aicore (default, drives nputop UTL) or vector.",
+    ),
     job_id: Optional[str] = typer.Option(
         None,
         help="Optional custom job id. Auto-generated when omitted.",
@@ -1503,8 +1547,10 @@ def start(
         host, port = _validate_cli_service_endpoint(host, port)
         interval = _validate_cli_interval(interval)
         busy_threshold = _validate_cli_busy_threshold(busy_threshold)
+        workload = _validate_cli_workload(workload)
         parsed_npu_ids = _parse_npu_ids(npu_ids)
         _validate_cli_vram(vram)
+        _validate_cli_workload_vram(workload, vram)
         job_id = _validate_cli_job_id(job_id)
         auto_started = _ensure_service_running(host, port, auto_start=auto_start)
         result = _rpc_call(
@@ -1514,6 +1560,7 @@ def start(
                 "vram": vram,
                 "interval": interval,
                 "busy_threshold": busy_threshold,
+                "workload": workload,
                 "job_id": job_id,
             },
             host,

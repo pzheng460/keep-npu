@@ -88,13 +88,15 @@ describe("buildSessionPayload", () => {
         npuIds: "0,1",
         vram: " 1GiB ",
         interval: "120",
-        busyThreshold: "15"
+        busyThreshold: "15",
+        workload: "aicore"
       })
     ).toEqual({
       npu_ids: [0, 1],
       vram: "1GiB",
       interval: 120,
-      busy_threshold: 15
+      busy_threshold: 15,
+      workload: "aicore"
     })
   })
 
@@ -104,11 +106,25 @@ describe("buildSessionPayload", () => {
         npuIds: "",
         vram: "1GiB",
         interval: "0.5",
-        busyThreshold: "25"
+        busyThreshold: "25",
+        workload: "vector"
       })
     ).toMatchObject({
-      interval: 0.5
+      interval: 0.5,
+      workload: "vector"
     })
+  })
+
+  it("rejects unknown workload values", () => {
+    expect(() =>
+      buildSessionPayload({
+        npuIds: "",
+        vram: "1GiB",
+        interval: "1",
+        busyThreshold: "25",
+        workload: "relu"
+      })
+    ).toThrow("Workload must be aicore or vector")
   })
 })
 

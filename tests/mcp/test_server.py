@@ -23,15 +23,27 @@ from keep_npu.mcp.server import (
 )
 from keep_npu.utilities import npu_info, platform_manager as pm
 from keep_npu.utilities.humanized_input import PUBLIC_VRAM_MAX_BYTES
-from keep_npu.utilities.session_config import JOB_ID_PATTERN_TEXT, MAX_NPU_IDS
+from keep_npu.utilities.session_config import (
+    DEFAULT_WORKLOAD,
+    JOB_ID_PATTERN_TEXT,
+    MAX_NPU_IDS,
+)
 
 
 class DummyController:
-    def __init__(self, npu_ids=None, interval=0, vram_to_keep=None, busy_threshold=0):
+    def __init__(
+        self,
+        npu_ids=None,
+        interval=0,
+        vram_to_keep=None,
+        busy_threshold=0,
+        workload=DEFAULT_WORKLOAD,
+    ):
         self.npu_ids = npu_ids
         self.interval = interval
         self.vram_to_keep = vram_to_keep
         self.busy_threshold = busy_threshold
+        self.workload = workload
         self.kept = False
         self.released = False
 
@@ -172,6 +184,7 @@ def test_start_status_stop_cycle():
     assert status["params"]["vram"] == "2GiB"
     assert status["params"]["interval"] == 5
     assert status["params"]["busy_threshold"] == 20
+    assert status["params"]["workload"] == "aicore"
 
     stopped = server.stop_keep(job_id)
     assert job_id in stopped["stopped"]
@@ -194,6 +207,7 @@ def test_status_returns_param_snapshots_for_active_sessions():
         "vram": "1GiB",
         "interval": 300,
         "busy_threshold": 25,
+        "workload": "aicore",
     }
 
 
@@ -205,6 +219,15 @@ def test_start_keep_preserves_fractional_interval():
 
     assert server.status(job_id)["params"]["interval"] == 0.5
     assert server._sessions[job_id].controller.interval == 0.5
+
+
+def test_start_keep_accepts_explicit_vector_workload():
+    server = make_server()
+
+    job_id = server.start_keep(npu_ids=[0], workload="vector")["job_id"]
+
+    assert server.status(job_id)["params"]["workload"] == "vector"
+    assert server._sessions[job_id].controller.workload == "vector"
 
 
 def test_start_keep_defaults_to_eco_safe_busy_threshold():
@@ -270,6 +293,7 @@ def test_status_list_marks_runtime_failed_sessions():
                 "vram": "1GiB",
                 "interval": 300,
                 "busy_threshold": 25,
+                "workload": "aicore",
             },
             "state": "runtime_failed",
             "last_error": "rank 0: allocation retries exhausted",
@@ -503,6 +527,7 @@ def test_status_reports_starting_session_during_controller_keep():
             "vram": "512MB",
             "interval": 7,
             "busy_threshold": 25,
+            "workload": "aicore",
         }
         assert server.status("starting-job") == {
             "active": True,
@@ -1574,12 +1599,20 @@ def test_mcp_tools_list_exposes_keepnpu_actions():
     assert start_schema["properties"]["vram"]["minimum"] == 4
     assert start_schema["properties"]["vram"]["maximum"] == PUBLIC_VRAM_MAX_BYTES
     vram_description = start_schema["properties"]["vram"]["description"]
-    assert "below 4 bytes" in vram_description
+    assert "AI Core requires at least 1536 bytes" in vram_description
+    assert "Vector requires at least 4 bytes" in vram_description
     assert "above 1 PiB" in vram_description
     assert "round" in vram_description
     assert start_schema["properties"]["interval"]["type"] == "number"
     assert start_schema["properties"]["interval"]["exclusiveMinimum"] == 0
     assert start_schema["properties"]["busy_threshold"]["default"] == 25
+    workload_schema = start_schema["properties"]["workload"]
+    assert workload_schema["enum"] == ["aicore", "vector"]
+    assert workload_schema["default"] == "aicore"
+    assert {
+        "if": {"properties": {"workload": {"const": "aicore"}}},
+        "then": {"properties": {"vram": {"minimum": 1536}}},
+    } in start_schema["allOf"]
     for tool_name in ("start_keep", "stop_keep", "status"):
         job_id_schema = tools[tool_name]["inputSchema"]["properties"]["job_id"]
         assert job_id_schema["type"] == ["string", "null"]
@@ -1864,6 +1897,43 @@ def test_mcp_tools_call_validates_cheap_inputs_before_listed_npus(monkeypatch):
         assert server.status()["active_jobs"] == []
     finally:
         server.shutdown()
+
+
+def test_small_default_aicore_budget_is_invalid_params_before_listed_npus(monkeypatch):
+    server = KeepNPUServer()
+    monkeypatch.setattr(
+        server,
+        "list_npus",
+        lambda: (_ for _ in ()).throw(AssertionError("list_npus should not run")),
+    )
+
+    direct = _handle_request(
+        server,
+        {
+            "jsonrpc": "2.0",
+            "id": 51,
+            "method": "start_keep",
+            "params": {"npu_ids": [0], "vram": 4},
+        },
+    )
+    tool = _handle_request(
+        server,
+        {
+            "jsonrpc": "2.0",
+            "id": 52,
+            "method": "tools/call",
+            "params": {
+                "name": "start_keep",
+                "arguments": {"npu_ids": [0], "vram": 4},
+            },
+        },
+    )
+
+    assert direct["error"]["code"] == JSONRPC_INVALID_PARAMS
+    assert "at least 1536 bytes" in direct["error"]["message"]
+    assert tool["result"]["isError"] is True
+    assert "at least 1536 bytes" in tool["result"]["content"][0]["text"]
+    assert server.status()["active_jobs"] == []
 
 
 def test_mcp_tools_call_unexpected_failure_returns_jsonrpc_internal_error():

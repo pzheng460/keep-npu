@@ -201,6 +201,7 @@ def controller_kwargs(config: KeepAliveConfig) -> dict:
         "interval": config.interval,
         "vram_to_keep": estimate_tensor_bytes(config.size, config.dtype_name),
         "busy_threshold": -1,
+        "workload": "aicore",
     }
 
 

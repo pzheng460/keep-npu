@@ -29,7 +29,8 @@ const defaultForm = {
   npuIds: "",
   vram: "1GiB",
   interval: "300",
-  busyThreshold: "25"
+  busyThreshold: "25",
+  workload: "aicore"
 }
 
 function formatBytes(value) {
@@ -339,7 +340,24 @@ export default function App() {
                 />
               </label>
 
-              <label className="field-label md:col-span-2">
+              <label className="field-label">
+                <span>Workload</span>
+                <select
+                  className="field-input"
+                  value={form.workload}
+                  onChange={(event) =>
+                    setForm((previous) => ({
+                      ...previous,
+                      workload: event.target.value
+                    }))
+                  }
+                >
+                  <option value="aicore">AI Core (default)</option>
+                  <option value="vector">Vector (lightweight)</option>
+                </select>
+              </label>
+
+              <label className="field-label">
                 <span>Busy threshold (%)</span>
                 <input
                   className="field-input"
@@ -411,7 +429,8 @@ export default function App() {
                         <p className="mt-1 text-sm text-shell-400">
                           Visible NPUs {formatNpuTarget(session.params.npu_ids)} ·{" "}
                           {session.params.vram} · {session.params.interval}s · threshold{" "}
-                          {formatBusyThresholdLabel(session.params.busy_threshold)}
+                          {formatBusyThresholdLabel(session.params.busy_threshold)} ·{" "}
+                          {session.params.workload}
                         </p>
                         {stateDetail ? (
                           <p className="mt-2 max-w-xl text-xs leading-relaxed text-shell-500">

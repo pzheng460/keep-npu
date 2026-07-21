@@ -5,8 +5,9 @@ class FakeController:
     instances = []
     fail_rank = None
 
-    def __init__(self, *, rank, interval, vram_to_keep, busy_threshold):
+    def __init__(self, *, rank, interval, vram_to_keep, busy_threshold, workload):
         self.rank = rank
+        self.workload = workload
         self.keep_calls = 0
         self.release_calls = 0
         self._thread = None
@@ -46,6 +47,32 @@ def test_global_rejects_out_of_range_visible_npu(monkeypatch):
 
     with pytest.raises(ValueError, match="less than 2"):
         module.GlobalNPUController(npu_ids=[2])
+
+
+def test_global_rejects_small_aicore_budget_before_hardware_enumeration(monkeypatch):
+    from keep_npu.global_npu_controller import global_npu_controller as module
+
+    monkeypatch.setattr(
+        module,
+        "visible_torch_device_count",
+        lambda: (_ for _ in ()).throw(AssertionError("hardware should not be queried")),
+    )
+
+    with pytest.raises(ValueError, match="at least 1536 bytes"):
+        module.GlobalNPUController(npu_ids=[0], vram_to_keep=4)
+
+
+def test_global_controller_passes_workload_to_each_device(monkeypatch):
+    from keep_npu.global_npu_controller import global_npu_controller as module
+
+    FakeController.instances = []
+    FakeController.fail_rank = None
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 2)
+    monkeypatch.setattr(module, "AscendNPUController", FakeController)
+
+    controller = module.GlobalNPUController(npu_ids=[0, 1], workload="vector")
+
+    assert [item.workload for item in controller.controllers] == ["vector", "vector"]
 
 
 def test_global_rolls_back_partial_start(monkeypatch):

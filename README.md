@@ -4,8 +4,9 @@ KeepNPU is a small, polite Huawei Ascend NPU keeper for shared machines. It
 matches KeepGPU's CLI, service, REST/JSON-RPC, MCP, and dashboard workflows,
 using `torch_npu` and `npu-smi` for Ascend devices.
 
-It allocates only when utilization backoff permits, keeps the requested device
-memory signal lightweight, and releases cleanly on exit.
+It allocates only when utilization backoff permits, uses FP16 matrix
+multiplication to drive Ascend AI Core/Cube utilization by default, and releases
+cleanly on exit.
 
 ## Requirements
 
@@ -42,12 +43,16 @@ Keep all visible NPUs, or select torch-visible ordinals with `--npu-ids`:
 ```console
 keep-npu --vram 1GiB --interval 60
 keep-npu --npu-ids 0,2 --vram 512MiB --interval 30
+keep-npu --npu-ids 4,5,6,7 --vram 1GiB --interval 0.001 --busy-threshold -1
 ```
 
 Press `Ctrl+C` to release memory. The default utilization threshold is 25%;
 KeepNPU reads Ascend's total NPU utilization (including AI Core and AI Vector
 work) and backs off while a device is busier than that or telemetry is unknown.
 Use `--busy-threshold -1` only when you intentionally want to disable backoff.
+The default AI Core workload is designed to raise the `UTL` value shown by
+`nputop`. Use `--workload vector` only for the lighter ReLU workload; Vector
+activity commonly remains absent from `nputop`'s AI Core utilization value.
 
 ## Service and dashboard
 

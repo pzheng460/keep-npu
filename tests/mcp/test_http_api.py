@@ -24,11 +24,19 @@ from keep_npu.utilities.platform_manager import (
 
 
 class DummyController:
-    def __init__(self, npu_ids=None, interval=0, vram_to_keep=None, busy_threshold=0):
+    def __init__(
+        self,
+        npu_ids=None,
+        interval=0,
+        vram_to_keep=None,
+        busy_threshold=0,
+        workload="aicore",
+    ):
         self.npu_ids = npu_ids
         self.interval = interval
         self.vram_to_keep = vram_to_keep
         self.busy_threshold = busy_threshold
+        self.workload = workload
         self.kept = False
         self.released = False
 
@@ -1829,8 +1837,9 @@ def test_http_status_reports_runtime_failed_session():
                 "params": {
                     "npu_ids": [0],
                     "vram": "256MB",
-                    "interval": 20,
-                    "busy_threshold": 25,
+                        "interval": 20,
+                        "busy_threshold": 25,
+                        "workload": "aicore",
                 },
                 "state": "runtime_failed",
                 "last_error": "rank 0: allocation retries exhausted",
@@ -2264,9 +2273,10 @@ def test_http_status_reports_starting_session_during_controller_keep():
         expected_params = {
             "npu_ids": [0],
             "vram": "512MB",
-            "interval": 7,
-            "busy_threshold": 25,
-        }
+                "interval": 7,
+                "busy_threshold": 25,
+                "workload": "aicore",
+            }
         _, list_payload = _request_json("GET", f"{base}/api/sessions")
         assert list_payload["active_jobs"] == [
             {
@@ -2948,6 +2958,32 @@ def test_http_post_rejects_non_positive_interval():
         )
         assert status_code == 400
         assert "interval must be positive" in payload["error"]["message"]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_http_post_rejects_small_default_aicore_budget_before_inventory(monkeypatch):
+    server = make_server()
+    monkeypatch.setattr(
+        server,
+        "list_npus",
+        lambda: (_ for _ in ()).throw(AssertionError("list_npus should not run")),
+    )
+    httpd, thread, base = _start_http_server(server)
+
+    try:
+        status_code, payload = _request_json(
+            "POST",
+            f"{base}/api/sessions",
+            {"npu_ids": [0], "vram": 4},
+        )
+
+        assert status_code == 400
+        assert "at least 1536 bytes" in payload["error"]["message"]
+        assert server.status()["active_jobs"] == []
     finally:
         httpd.shutdown()
         httpd.server_close()

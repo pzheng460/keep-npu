@@ -52,6 +52,7 @@ from keep_npu.global_npu_controller.global_npu_controller import (
     GlobalNPUController,
     InvalidVisibleNPUSelectionError,
 )
+from keep_npu.single_npu_controller.workload import validate_workload_vram
 from keep_npu.utilities.endpoint_validation import validate_endpoint
 from keep_npu.utilities.humanized_input import (
     PUBLIC_VRAM_MAX_BYTES,
@@ -66,6 +67,7 @@ from keep_npu.utilities.platform_manager import (
 )
 from keep_npu.utilities.session_config import (
     DEFAULT_BUSY_THRESHOLD,
+    DEFAULT_WORKLOAD,
     JOB_ID_PATTERN_TEXT,
     MAX_NPU_IDS,
     PUBLIC_INTERVAL_MAX_SECONDS,
@@ -76,6 +78,7 @@ from keep_npu.utilities.session_config import (
     validate_interval,
     validate_job_id,
     validate_npu_ids,
+    validate_workload,
 )
 
 logger = setup_logger(__name__)
@@ -124,6 +127,12 @@ MCP_TOOLS: List[Dict[str, Any]] = [
         "description": "Start a keepalive session on selected visible NPU ordinals.",
         "inputSchema": {
             "type": "object",
+            "allOf": [
+                {
+                    "if": {"properties": {"workload": {"const": "aicore"}}},
+                    "then": {"properties": {"vram": {"minimum": 1536}}},
+                }
+            ],
             "properties": {
                 "npu_ids": {
                     "type": ["array", "null"],
@@ -138,7 +147,7 @@ MCP_TOOLS: List[Dict[str, Any]] = [
                     "minimum": 4,
                     "maximum": PUBLIC_VRAM_MAX_BYTES,
                     "default": "1GiB",
-                    "description": "Human-readable VRAM amount or integer bytes to keep; byte-equivalent values below 4 bytes or above 1 PiB are rejected, and internal element counts round up.",
+                    "description": "Human-readable VRAM amount or integer bytes to keep; AI Core requires at least 1536 bytes, Vector requires at least 4 bytes, values above 1 PiB are rejected, and internal element counts round up.",
                 },
                 "interval": {
                     "type": "number",
@@ -153,6 +162,12 @@ MCP_TOOLS: List[Dict[str, Any]] = [
                     "maximum": 100,
                     "default": DEFAULT_BUSY_THRESHOLD,
                     "description": "Defaults to 25; -1 disables utilization backoff; 0..100 backs off.",
+                },
+                "workload": {
+                    "type": "string",
+                    "enum": ["aicore", "vector"],
+                    "default": DEFAULT_WORKLOAD,
+                    "description": "AI Core matmul by default; vector selects lightweight ReLU.",
                 },
                 "job_id": {
                     "type": ["string", "null"],
@@ -471,6 +486,7 @@ class KeepNPUServer:
         vram: str = "1GiB",
         interval: Union[int, float] = 300,
         busy_threshold: int = DEFAULT_BUSY_THRESHOLD,
+        workload: str = DEFAULT_WORKLOAD,
         job_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
@@ -484,6 +500,7 @@ class KeepNPUServer:
                 values back off when utilization is above this percent or
                 telemetry is unavailable; ``-1`` disables utilization backoff
                 for unconditional keepalive.
+            workload: ``aicore`` by default, or explicit ``vector`` for ReLU.
             job_id: Optional session identifier; a UUID is generated if omitted.
 
         Returns:
@@ -497,7 +514,8 @@ class KeepNPUServer:
         busy_threshold = _validate_public_session_input(
             validate_busy_threshold, busy_threshold
         )
-        _validate_public_session_input(parse_vram_to_elements, vram)
+        workload = _validate_public_session_input(validate_workload, workload)
+        _validate_public_session_input(validate_workload_vram, workload, vram)
 
         job_id = _validate_public_session_input(validate_job_id, job_id)
         if job_id is None:
@@ -507,6 +525,7 @@ class KeepNPUServer:
             "vram": vram,
             "interval": interval,
             "busy_threshold": busy_threshold,
+            "workload": workload,
         }
         with self._sessions_lock:
             if job_id in self._sessions or job_id in self._starting_job_ids:
@@ -521,6 +540,7 @@ class KeepNPUServer:
                 interval=interval,
                 vram_to_keep=vram,
                 busy_threshold=busy_threshold,
+                workload=workload,
             )
             controller.keep()
         except Exception as exc:
@@ -923,7 +943,14 @@ def _is_valid_jsonrpc_id(req_id: Any) -> bool:
 
 
 _DIRECT_METHOD_PARAMS = {
-    "start_keep": {"npu_ids", "vram", "interval", "busy_threshold", "job_id"},
+    "start_keep": {
+        "npu_ids",
+        "vram",
+        "interval",
+        "busy_threshold",
+        "workload",
+        "job_id",
+    },
     "stop_keep": {"job_id"},
     "status": {"job_id"},
     "list_npus": set(),
@@ -1039,8 +1066,17 @@ def _prevalidate_rest_session_payload(
         safe_payload["busy_threshold"] = _validate_public_session_input(
             validate_busy_threshold, safe_payload["busy_threshold"]
         )
+    if "workload" in safe_payload:
+        safe_payload["workload"] = _validate_public_session_input(
+            validate_workload, safe_payload["workload"]
+        )
     if "vram" in safe_payload:
         _validate_public_session_input(parse_vram_to_elements, safe_payload["vram"])
+    _validate_public_session_input(
+        validate_workload_vram,
+        safe_payload.get("workload", DEFAULT_WORKLOAD),
+        safe_payload.get("vram", "1GiB"),
+    )
     if "job_id" in safe_payload:
         job_id = _validate_public_session_input(validate_job_id, safe_payload["job_id"])
         safe_payload["job_id"] = job_id

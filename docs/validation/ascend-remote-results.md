@@ -106,3 +106,41 @@ KeepNPU now reads the total NPU utilization metric for backoff. The deployed
 monitor returned 100%; a busy threshold of 25 rejected another keep-alive
 batch, while the explicit `-1` mode allowed it. The test process was terminated
 with SIGTERM and its temporary deployment directory was removed.
+
+## Default AI Core workload validation
+
+Version 1.0.3 was installed from its locally built wheel into an isolated
+`--system-site-packages` virtual environment on the 910B2 host. The shared
+Ascend Python environment was not modified. Testing used the public command
+without an explicit workload option:
+
+```console
+keep-npu --npu-ids 4,5,6,7 --vram 1GiB --interval 0.001 --busy-threshold -1
+```
+
+Two hardware-specific bottlenecks were found and corrected. Unconditional mode
+had still queried `npu-smi` before every batch, and the controller had slept for
+one millisecond after every completed batch. Skipping telemetry and inter-batch
+sleep when the threshold is `-1` raised repeated AI Core readings from zero,
+then 87%, to the final result below. A matrix-size sweep found 8192 to be the
+best tested cap: 4096 reached 94–95%, while 12288 regressed to 92–94%.
+
+Five consecutive samples from the final four-device run were:
+
+| NPU | AI Core utilization | Total NPU utilization |
+| --- | --- | --- |
+| 4 | 96, 96, 96, 96, 96% | 100% in every sample |
+| 5 | 95, 95, 95, 95, 95% | 100% in every sample |
+| 6 | 96, 96, 96, 96, 96% | 100% in every sample |
+| 7 | 96, 96, 96, 97, 96% | 100% in every sample |
+
+`npu-smi info` associated the KeepNPU PID only with devices 4–7, with one
+roughly 1180 MiB context on each selected device. Devices 0–3 retained only
+their pre-existing Ray/VLLM processes; KeepNPU created no process or allocation
+on them.
+
+The explicit `--workload vector` smoke test produced 99% AI Vector and 100%
+total utilization. Vector execution now synchronizes its asynchronous queue in
+bounded groups, so SIGTERM released the 1 GiB allocation cleanly without the
+previous two-second worker shutdown error. A final post-stop sample showed zero
+AI Core, AI Vector, and total utilization on devices 4–7.

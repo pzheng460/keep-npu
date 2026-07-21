@@ -26,7 +26,8 @@ const validSessionRecord = {
     npu_ids: [0],
     vram: "1GiB",
     interval: 300,
-    busy_threshold: 25
+    busy_threshold: 25,
+    workload: "aicore"
   },
   state: "active",
   last_error: null
@@ -104,6 +105,28 @@ describe("dashboard refresh helpers", () => {
       npus: [validNpuRecord],
       sessions: [sessionWithByteVram],
       warning: null
+    })
+  })
+
+  it("rejects malformed session workload values", async () => {
+    const malformedSession = {
+      ...validSessionRecord,
+      params: {
+        ...validSessionRecord.params,
+        workload: "relu"
+      }
+    }
+    const requestJson = async (_method, path) => {
+      if (path === "/api/sessions") {
+        return { active_jobs: [malformedSession] }
+      }
+      return { npus: [validNpuRecord] }
+    }
+
+    await expect(fetchDashboardPayloads(requestJson)).resolves.toEqual({
+      npus: [validNpuRecord],
+      sessions: null,
+      warning: "Refresh warning: malformed session list response"
     })
   })
 

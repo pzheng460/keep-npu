@@ -50,6 +50,7 @@ class KeepNpuAliveTests(unittest.TestCase):
                 "interval": 5.0,
                 "vram_to_keep": 256 * 256 * 2 * 3,
                 "busy_threshold": -1,
+                "workload": "aicore",
             },
         )
 
