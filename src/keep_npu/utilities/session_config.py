@@ -120,9 +120,9 @@ def validate_busy_threshold(busy_threshold: Any) -> int:
 
 def validate_workload(value: Any) -> str:
     """Validate and normalize the keepalive workload name."""
-    if value not in {"aicore", "vector"}:
+    if not isinstance(value, str) or value not in {"aicore", "vector"}:
         raise ValueError("workload must be 'aicore' or 'vector'")
-    return str(value)
+    return value
 
 
 def validate_positive_integer(value: Any, name: str) -> int:

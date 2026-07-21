@@ -2965,6 +2965,32 @@ def test_http_post_rejects_non_positive_interval():
         thread.join(timeout=2)
 
 
+def test_http_post_rejects_small_default_aicore_budget_before_inventory(monkeypatch):
+    server = make_server()
+    monkeypatch.setattr(
+        server,
+        "list_npus",
+        lambda: (_ for _ in ()).throw(AssertionError("list_npus should not run")),
+    )
+    httpd, thread, base = _start_http_server(server)
+
+    try:
+        status_code, payload = _request_json(
+            "POST",
+            f"{base}/api/sessions",
+            {"npu_ids": [0], "vram": 4},
+        )
+
+        assert status_code == 400
+        assert "at least 1536 bytes" in payload["error"]["message"]
+        assert server.status()["active_jobs"] == []
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        server.shutdown()
+        thread.join(timeout=2)
+
+
 def test_http_post_rejects_nan_interval_as_bad_json_without_creating_session():
     server = make_server()
     httpd, thread, base = _start_http_server(server)

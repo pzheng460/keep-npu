@@ -52,6 +52,7 @@ from keep_npu.global_npu_controller.global_npu_controller import (
     GlobalNPUController,
     InvalidVisibleNPUSelectionError,
 )
+from keep_npu.single_npu_controller.workload import validate_workload_vram
 from keep_npu.utilities.endpoint_validation import validate_endpoint
 from keep_npu.utilities.humanized_input import (
     PUBLIC_VRAM_MAX_BYTES,
@@ -126,6 +127,12 @@ MCP_TOOLS: List[Dict[str, Any]] = [
         "description": "Start a keepalive session on selected visible NPU ordinals.",
         "inputSchema": {
             "type": "object",
+            "allOf": [
+                {
+                    "if": {"properties": {"workload": {"const": "aicore"}}},
+                    "then": {"properties": {"vram": {"minimum": 1536}}},
+                }
+            ],
             "properties": {
                 "npu_ids": {
                     "type": ["array", "null"],
@@ -140,7 +147,7 @@ MCP_TOOLS: List[Dict[str, Any]] = [
                     "minimum": 4,
                     "maximum": PUBLIC_VRAM_MAX_BYTES,
                     "default": "1GiB",
-                    "description": "Human-readable VRAM amount or integer bytes to keep; byte-equivalent values below 4 bytes or above 1 PiB are rejected, and internal element counts round up.",
+                    "description": "Human-readable VRAM amount or integer bytes to keep; AI Core requires at least 1536 bytes, Vector requires at least 4 bytes, values above 1 PiB are rejected, and internal element counts round up.",
                 },
                 "interval": {
                     "type": "number",
@@ -508,7 +515,7 @@ class KeepNPUServer:
             validate_busy_threshold, busy_threshold
         )
         workload = _validate_public_session_input(validate_workload, workload)
-        _validate_public_session_input(parse_vram_to_elements, vram)
+        _validate_public_session_input(validate_workload_vram, workload, vram)
 
         job_id = _validate_public_session_input(validate_job_id, job_id)
         if job_id is None:
@@ -1065,6 +1072,11 @@ def _prevalidate_rest_session_payload(
         )
     if "vram" in safe_payload:
         _validate_public_session_input(parse_vram_to_elements, safe_payload["vram"])
+    _validate_public_session_input(
+        validate_workload_vram,
+        safe_payload.get("workload", DEFAULT_WORKLOAD),
+        safe_payload.get("vram", "1GiB"),
+    )
     if "job_id" in safe_payload:
         job_id = _validate_public_session_input(validate_job_id, safe_payload["job_id"])
         safe_payload["job_id"] = job_id

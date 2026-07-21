@@ -1599,7 +1599,8 @@ def test_mcp_tools_list_exposes_keepnpu_actions():
     assert start_schema["properties"]["vram"]["minimum"] == 4
     assert start_schema["properties"]["vram"]["maximum"] == PUBLIC_VRAM_MAX_BYTES
     vram_description = start_schema["properties"]["vram"]["description"]
-    assert "below 4 bytes" in vram_description
+    assert "AI Core requires at least 1536 bytes" in vram_description
+    assert "Vector requires at least 4 bytes" in vram_description
     assert "above 1 PiB" in vram_description
     assert "round" in vram_description
     assert start_schema["properties"]["interval"]["type"] == "number"
@@ -1608,6 +1609,10 @@ def test_mcp_tools_list_exposes_keepnpu_actions():
     workload_schema = start_schema["properties"]["workload"]
     assert workload_schema["enum"] == ["aicore", "vector"]
     assert workload_schema["default"] == "aicore"
+    assert {
+        "if": {"properties": {"workload": {"const": "aicore"}}},
+        "then": {"properties": {"vram": {"minimum": 1536}}},
+    } in start_schema["allOf"]
     for tool_name in ("start_keep", "stop_keep", "status"):
         job_id_schema = tools[tool_name]["inputSchema"]["properties"]["job_id"]
         assert job_id_schema["type"] == ["string", "null"]
@@ -1892,6 +1897,43 @@ def test_mcp_tools_call_validates_cheap_inputs_before_listed_npus(monkeypatch):
         assert server.status()["active_jobs"] == []
     finally:
         server.shutdown()
+
+
+def test_small_default_aicore_budget_is_invalid_params_before_listed_npus(monkeypatch):
+    server = KeepNPUServer()
+    monkeypatch.setattr(
+        server,
+        "list_npus",
+        lambda: (_ for _ in ()).throw(AssertionError("list_npus should not run")),
+    )
+
+    direct = _handle_request(
+        server,
+        {
+            "jsonrpc": "2.0",
+            "id": 51,
+            "method": "start_keep",
+            "params": {"npu_ids": [0], "vram": 4},
+        },
+    )
+    tool = _handle_request(
+        server,
+        {
+            "jsonrpc": "2.0",
+            "id": 52,
+            "method": "tools/call",
+            "params": {
+                "name": "start_keep",
+                "arguments": {"npu_ids": [0], "vram": 4},
+            },
+        },
+    )
+
+    assert direct["error"]["code"] == JSONRPC_INVALID_PARAMS
+    assert "at least 1536 bytes" in direct["error"]["message"]
+    assert tool["result"]["isError"] is True
+    assert "at least 1536 bytes" in tool["result"]["content"][0]["text"]
+    assert server.status()["active_jobs"] == []
 
 
 def test_mcp_tools_call_unexpected_failure_returns_jsonrpc_internal_error():

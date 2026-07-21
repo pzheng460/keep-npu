@@ -70,6 +70,13 @@ def test_validate_cli_workload_rejects_unknown_values(workload):
         cli._validate_cli_workload(workload)
 
 
+def test_validate_cli_workload_vram_rejects_small_default_aicore_budget():
+    with pytest.raises(typer.BadParameter, match="at least 1536 bytes"):
+        cli._validate_cli_workload_vram("aicore", "4")
+
+    assert cli._validate_cli_workload_vram("vector", "4") == "4"
+
+
 def test_apply_legacy_threshold_none():
     vram, threshold, mode = cli._apply_legacy_threshold("1GiB", None, -1)
     assert vram == "1GiB"

@@ -2,6 +2,10 @@
 
 from dataclasses import dataclass
 from math import isqrt
+from typing import Union
+
+from keep_npu.utilities.humanized_input import parse_vram_to_elements
+from keep_npu.utilities.session_config import validate_workload
 
 FP16_BYTES = 2
 MATRIX_COUNT = 3
@@ -34,3 +38,12 @@ def plan_aicore_workload(float32_elements: int) -> AICorePlan:
     filler_elements = (budget_bytes - matrix_bytes) // 4
     allocated_bytes = matrix_bytes + filler_elements * 4
     return AICorePlan(matrix_dim, filler_elements, allocated_bytes)
+
+
+def validate_workload_vram(workload: object, vram: Union[int, str]) -> int:
+    """Validate a workload and its workload-specific VRAM budget locally."""
+    normalized_workload = validate_workload(workload)
+    float32_elements = parse_vram_to_elements(vram)
+    if normalized_workload == "aicore":
+        plan_aicore_workload(float32_elements)
+    return float32_elements

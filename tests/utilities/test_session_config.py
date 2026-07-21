@@ -180,7 +180,7 @@ def test_validate_workload_accepts_public_values():
     assert validate_workload("vector") == "vector"
 
 
-@pytest.mark.parametrize("value", [None, "", "AICORE", "relu", 1, True])
+@pytest.mark.parametrize("value", [None, "", "AICORE", "relu", 1, True, [], {}])
 def test_validate_workload_rejects_noncanonical_values(value):
     with pytest.raises(ValueError, match="workload must be 'aicore' or 'vector'"):
         validate_workload(value)

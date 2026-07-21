@@ -49,6 +49,19 @@ def test_global_rejects_out_of_range_visible_npu(monkeypatch):
         module.GlobalNPUController(npu_ids=[2])
 
 
+def test_global_rejects_small_aicore_budget_before_hardware_enumeration(monkeypatch):
+    from keep_npu.global_npu_controller import global_npu_controller as module
+
+    monkeypatch.setattr(
+        module,
+        "visible_torch_device_count",
+        lambda: (_ for _ in ()).throw(AssertionError("hardware should not be queried")),
+    )
+
+    with pytest.raises(ValueError, match="at least 1536 bytes"):
+        module.GlobalNPUController(npu_ids=[0], vram_to_keep=4)
+
+
 def test_global_controller_passes_workload_to_each_device(monkeypatch):
     from keep_npu.global_npu_controller import global_npu_controller as module
 

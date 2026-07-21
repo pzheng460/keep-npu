@@ -19,6 +19,7 @@ from urllib.request import Request, urlopen
 import typer
 from rich.console import Console
 
+from keep_npu.single_npu_controller.workload import validate_workload_vram
 from keep_npu.utilities.endpoint_validation import (
     validate_endpoint,
     validate_endpoint_host,
@@ -522,6 +523,14 @@ def _validate_cli_workload(workload: Any) -> str:
         return validate_workload(workload)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+
+
+def _validate_cli_workload_vram(workload: Any, vram: str) -> str:
+    try:
+        validate_workload_vram(workload, vram)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    return vram
 
 
 def _validate_cli_job_id(job_id: Optional[str]) -> Optional[str]:
@@ -1335,6 +1344,7 @@ def _run_blocking(
         )
     busy_threshold = _validate_cli_busy_threshold(busy_threshold)
     workload = _validate_cli_workload(workload)
+    _validate_cli_workload_vram(workload, vram)
 
     npu_id_list = _parse_npu_ids(npu_ids)
 
@@ -1433,6 +1443,7 @@ def main(
             vram, legacy_threshold, busy_threshold
         )
         _validate_cli_vram(legacy_vram)
+        _validate_cli_workload_vram(workload, legacy_vram)
         _validate_cli_busy_threshold(legacy_busy_threshold)
         _run_blocking(
             interval,
@@ -1539,6 +1550,7 @@ def start(
         workload = _validate_cli_workload(workload)
         parsed_npu_ids = _parse_npu_ids(npu_ids)
         _validate_cli_vram(vram)
+        _validate_cli_workload_vram(workload, vram)
         job_id = _validate_cli_job_id(job_id)
         auto_started = _ensure_service_running(host, port, auto_start=auto_start)
         result = _rpc_call(

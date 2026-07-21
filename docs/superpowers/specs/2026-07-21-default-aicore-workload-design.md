@@ -74,7 +74,7 @@ Existing utilization-backoff behavior remains intact:
 - `--busy-threshold -1` skips utilization gating and runs the matrix workload
   continuously, subject only to bounded synchronization and stop checks.
 - A threshold from 0 through 100 queries total NPU utilization before work. If
-  the device is at or above the threshold, or telemetry is unavailable, the
+  the device is above the threshold, or telemetry is unavailable, the
   worker waits for `--interval` before checking again.
 - Once allowed to run, an initial batch of 32 matrix multiplications avoids
   per-operation telemetry subprocesses and minimizes idle gaps. The next
@@ -169,8 +169,8 @@ before/during/after evidence from `npu-smi` and the metric source used by
 3. Unselected devices gain no KeepNPU process or memory allocation.
 4. Ctrl+C/SIGTERM and normal stop remove KeepNPU processes and return memory to
    its pre-test range.
-5. Default safe-threshold mode still backs off when total utilization is at or
-   above its threshold, while `-1` runs unconditionally.
+5. Default safe-threshold mode still backs off when total utilization is above
+   its threshold, while `-1` runs unconditionally.
 
 Explicit vector mode will also receive a short smoke test confirming that it
 runs and releases, but its AI Core/`nputop` UTL is not an acceptance metric.
