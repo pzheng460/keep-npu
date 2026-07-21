@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { requestJson as api } from "./lib/api"
 import {
   AUTO_REFRESH_INTERVAL_MS,

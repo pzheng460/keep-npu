@@ -86,7 +86,7 @@ def validate_npu_ids(npu_ids: Any) -> Optional[List[int]]:
         raise ValueError("npu_ids must select at least one NPU")
     if len(npu_ids) > MAX_NPU_IDS:
         raise ValueError("npu_ids has too many items")
-    if any(not _is_plain_int(gpu_id) or gpu_id < 0 for gpu_id in npu_ids):
+    if any(not _is_plain_int(npu_id) or npu_id < 0 for npu_id in npu_ids):
         raise ValueError("npu_ids must contain non-negative integers")
     if len(set(npu_ids)) != len(npu_ids):
         raise ValueError("npu_ids must not contain duplicate values")

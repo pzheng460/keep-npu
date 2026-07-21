@@ -17,7 +17,10 @@ from keep_npu.mcp.server import (
     _JSONRPCHandler,
 )
 from keep_npu.utilities import platform_manager as pm
-from keep_npu.utilities.platform_manager import DeviceEnumerationUnavailableError
+from keep_npu.utilities.platform_manager import (
+    DeviceEnumerationUnavailableError,
+    NPUBackendUnavailableError,
+)
 
 
 class DummyController:
@@ -2500,6 +2503,30 @@ def test_http_get_api_gpus_enumeration_unavailable_returns_json_503(monkeypatch)
     assert status_code == 503
     assert payload["error"]["message"] == "Unable to enumerate visible NPUs"
     assert payload["error"]["type"] == "DeviceEnumerationUnavailableError"
+
+
+def test_http_get_api_npus_backend_unavailable_returns_json_503(monkeypatch):
+    server = make_server()
+    monkeypatch.setattr(
+        server,
+        "list_npus",
+        lambda: (_ for _ in ()).throw(
+            NPUBackendUnavailableError("torch_npu is unavailable")
+        ),
+    )
+    httpd, thread, base = _start_http_server(server)
+
+    try:
+        status_code, payload = _request_json("GET", f"{base}/api/npus")
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status_code == 503
+    assert payload["error"]["message"] == "torch_npu is unavailable"
+    assert payload["error"]["type"] == "NPUBackendUnavailableError"
 
 
 @pytest.mark.parametrize(

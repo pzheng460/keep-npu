@@ -60,7 +60,10 @@ from keep_npu.utilities.humanized_input import (
 from keep_npu.utilities.json_protocol import strict_json_loads
 from keep_npu.utilities.logger import setup_logger
 from keep_npu.utilities.npu_info import get_npu_info
-from keep_npu.utilities.platform_manager import DeviceEnumerationUnavailableError
+from keep_npu.utilities.platform_manager import (
+    DeviceEnumerationUnavailableError,
+    NPUBackendUnavailableError,
+)
 from keep_npu.utilities.session_config import (
     DEFAULT_BUSY_THRESHOLD,
     JOB_ID_PATTERN_TEXT,
@@ -959,7 +962,11 @@ def _call_keepnpu_method(
             return server.list_npus()
     except SessionInputError as exc:
         raise JSONRPCError(JSONRPC_INVALID_PARAMS, str(exc)) from exc
-    except (SessionStartupUnavailable, DeviceEnumerationUnavailableError) as exc:
+    except (
+        SessionStartupUnavailable,
+        DeviceEnumerationUnavailableError,
+        NPUBackendUnavailableError,
+    ) as exc:
         raise JSONRPCError(JSONRPC_STARTUP_UNAVAILABLE, str(exc)) from exc
     raise JSONRPCError(JSONRPC_METHOD_NOT_FOUND, f"Unknown method: {method}")
 
@@ -1499,13 +1506,16 @@ class _JSONRPCHandler(BaseHTTPRequestHandler):
             if path == "/api/npus":
                 try:
                     self._json_response(200, server_ref.list_npus())
-                except DeviceEnumerationUnavailableError as exc:
+                except (
+                    DeviceEnumerationUnavailableError,
+                    NPUBackendUnavailableError,
+                ) as exc:
                     self._json_response(
                         503,
                         {
                             "error": {
                                 "message": str(exc),
-                                "type": DeviceEnumerationUnavailableError.__name__,
+                                "type": exc.__class__.__name__,
                             }
                         },
                     )
@@ -1620,7 +1630,10 @@ class _JSONRPCHandler(BaseHTTPRequestHandler):
                             npu_ids,
                             require_visible_npus=True,
                         )
-                    except DeviceEnumerationUnavailableError as exc:
+                    except (
+                        DeviceEnumerationUnavailableError,
+                        NPUBackendUnavailableError,
+                    ) as exc:
                         self._json_response(
                             503,
                             {
