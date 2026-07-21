@@ -4,13 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import math
 import signal
 import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Sequence
-
 
 DTYPE_BYTES = {
     "float16": 2,
@@ -52,7 +52,7 @@ def normalize_device(device: str) -> str:
 
 def positive_float(value: str) -> float:
     parsed = float(value)
-    if parsed <= 0:
+    if not math.isfinite(parsed) or parsed <= 0:
         raise argparse.ArgumentTypeError("value must be greater than 0")
     return parsed
 

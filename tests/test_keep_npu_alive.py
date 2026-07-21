@@ -1,3 +1,4 @@
+import argparse
 import unittest
 
 import keep_npu_alive
@@ -24,6 +25,12 @@ class KeepNpuAliveTests(unittest.TestCase):
 
     def test_normalize_device_keeps_explicit_npu_device(self):
         self.assertEqual(keep_npu_alive.normalize_device("npu:2"), "npu:2")
+
+    def test_positive_float_rejects_non_finite_values(self):
+        for value in ("nan", "inf", "-inf"):
+            with self.subTest(value=value):
+                with self.assertRaises(argparse.ArgumentTypeError):
+                    keep_npu_alive.positive_float(value)
 
 
 if __name__ == "__main__":
