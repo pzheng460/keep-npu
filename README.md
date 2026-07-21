@@ -45,7 +45,8 @@ keep-npu --npu-ids 0,2 --vram 512MiB --interval 30
 ```
 
 Press `Ctrl+C` to release memory. The default utilization threshold is 25%;
-KeepNPU backs off while a device is busier than that or telemetry is unknown.
+KeepNPU reads Ascend's total NPU utilization (including AI Core and AI Vector
+work) and backs off while a device is busier than that or telemetry is unknown.
 Use `--busy-threshold -1` only when you intentionally want to disable backoff.
 
 ## Service and dashboard

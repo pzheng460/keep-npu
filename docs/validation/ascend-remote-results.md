@@ -94,3 +94,15 @@ paths were redeployed once more:
 The `/tmp/keep-npu-final.Q5XXLo` deployment was removed after `pgrep`,
 `npu-smi`, and the test-port audit found no residual KeepNPU process or
 listener.
+
+## Busy-threshold alignment recheck
+
+The KeepGPU-compatible 5,000-pass ReLU batch was restored and tested on NPU 7
+with a 1 GiB allocation. During the batch, `npu-smi info -t usages -i 7`
+reported 99% AI Vector usage, 100% HBM bandwidth usage, and 100% total NPU
+utilization while the summary table's `AICore(%)` remained zero.
+
+KeepNPU now reads the total NPU utilization metric for backoff. The deployed
+monitor returned 100%; a busy threshold of 25 rejected another keep-alive
+batch, while the explicit `-1` mode allowed it. The test process was terminated
+with SIGTERM and its temporary deployment directory was removed.
