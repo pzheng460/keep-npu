@@ -5,7 +5,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "keep_npu"
+name = "keep-npu"
 dynamic = ["version"]  # Let setuptools read the version dynamically
 description = "KeepNPU is a polite NPU keeper with CLI, service, and MCP interfaces"
 readme = {file = "README.md", content-type = "text/markdown"}

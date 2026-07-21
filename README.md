@@ -23,11 +23,17 @@ source /usr/local/Ascend/ascend-toolkit/latest/bin/setenv.bash
 ## Install
 
 ```console
-python -m pip install .
+python -m pip install keep-npu
 ```
 
 `torch` and `torch_npu` are deliberately not installed as package dependencies:
 their versions must match the server's CANN and driver stack.
+
+To install the latest unreleased revision directly from GitHub:
+
+```console
+python -m pip install 'keep-npu @ git+https://github.com/pzheng460/keep-npu.git'
+```
 
 ## Blocking mode
 
