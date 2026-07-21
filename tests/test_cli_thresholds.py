@@ -59,6 +59,17 @@ def test_validate_cli_busy_threshold_rejects_non_canonical_numeric_tokens(
         cli._validate_cli_busy_threshold(busy_threshold)
 
 
+def test_validate_cli_workload_accepts_public_values():
+    assert cli._validate_cli_workload("aicore") == "aicore"
+    assert cli._validate_cli_workload("vector") == "vector"
+
+
+@pytest.mark.parametrize("workload", ["", "AICORE", "relu"])
+def test_validate_cli_workload_rejects_unknown_values(workload):
+    with pytest.raises(typer.BadParameter, match="workload must be"):
+        cli._validate_cli_workload(workload)
+
+
 def test_apply_legacy_threshold_none():
     vram, threshold, mode = cli._apply_legacy_threshold("1GiB", None, -1)
     assert vram == "1GiB"
@@ -122,12 +133,15 @@ def test_blocking_command_rejects_empty_npu_ids_before_run_blocking(monkeypatch)
 def test_blocking_command_accepts_fractional_interval(monkeypatch):
     captured = {}
 
-    def fake_run_blocking(interval, npu_ids, vram, legacy_threshold, busy_threshold):
+    def fake_run_blocking(
+        interval, npu_ids, vram, legacy_threshold, busy_threshold, workload
+    ):
         captured["interval"] = interval
         captured["npu_ids"] = npu_ids
         captured["vram"] = vram
         captured["legacy_threshold"] = legacy_threshold
         captured["busy_threshold"] = busy_threshold
+        captured["workload"] = workload
 
     monkeypatch.setattr(cli, "_run_blocking", fake_run_blocking)
 
@@ -135,6 +149,21 @@ def test_blocking_command_accepts_fractional_interval(monkeypatch):
 
     assert result.exit_code == 0
     assert captured["interval"] == 0.5
+    assert captured["workload"] == "aicore"
+
+
+def test_blocking_command_accepts_explicit_vector_workload(monkeypatch):
+    captured = {}
+
+    def fake_run_blocking(*args):
+        captured["workload"] = args[-1]
+
+    monkeypatch.setattr(cli, "_run_blocking", fake_run_blocking)
+
+    result = runner.invoke(cli.app, ["--workload", "vector"])
+
+    assert result.exit_code == 0
+    assert captured["workload"] == "vector"
 
 
 def test_blocking_command_reports_startup_failure_without_rich_traceback(monkeypatch):
@@ -163,11 +192,14 @@ def test_run_blocking_preserves_ascend_visible_devices_for_npu_ids(monkeypatch):
     captured = {}
 
     class DummyGlobalController:
-        def __init__(self, *, npu_ids, interval, vram_to_keep, busy_threshold):
+        def __init__(
+            self, *, npu_ids, interval, vram_to_keep, busy_threshold, workload
+        ):
             captured["npu_ids"] = npu_ids
             captured["interval"] = interval
             captured["vram_to_keep"] = vram_to_keep
             captured["busy_threshold"] = busy_threshold
+            captured["workload"] = workload
 
         def __enter__(self):
             captured["entered"] = True
@@ -199,6 +231,7 @@ def test_run_blocking_preserves_ascend_visible_devices_for_npu_ids(monkeypatch):
         "interval": 1,
         "vram_to_keep": "1MiB",
         "busy_threshold": -1,
+        "workload": "aicore",
         "entered": True,
         "exited": True,
     }
@@ -252,11 +285,14 @@ def test_run_blocking_defers_omitted_npu_enumeration_to_global_controller(
     captured = {}
 
     class DummyGlobalController:
-        def __init__(self, *, npu_ids, interval, vram_to_keep, busy_threshold):
+        def __init__(
+            self, *, npu_ids, interval, vram_to_keep, busy_threshold, workload
+        ):
             captured["npu_ids"] = npu_ids
             captured["interval"] = interval
             captured["vram_to_keep"] = vram_to_keep
             captured["busy_threshold"] = busy_threshold
+            captured["workload"] = workload
 
         def __enter__(self):
             captured["entered"] = True
@@ -287,6 +323,7 @@ def test_run_blocking_defers_omitted_npu_enumeration_to_global_controller(
         "interval": 1,
         "vram_to_keep": "1MiB",
         "busy_threshold": -1,
+        "workload": "aicore",
         "entered": True,
         "exited": True,
     }
@@ -307,11 +344,14 @@ def test_run_blocking_logs_busy_threshold_semantically(
     monkeypatch, caplog, busy_threshold, expected_message, forbidden_message
 ):
     class DummyGlobalController:
-        def __init__(self, *, npu_ids, interval, vram_to_keep, busy_threshold):
+        def __init__(
+            self, *, npu_ids, interval, vram_to_keep, busy_threshold, workload
+        ):
             self.npu_ids = npu_ids
             self.interval = interval
             self.vram_to_keep = vram_to_keep
             self.busy_threshold = busy_threshold
+            self.workload = workload
 
         def __enter__(self):
             return self

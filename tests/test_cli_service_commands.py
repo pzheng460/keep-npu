@@ -27,6 +27,7 @@ def _status_session_record(state="active"):
             "vram": "1GiB",
             "interval": 60,
             "busy_threshold": 25,
+            "workload": "aicore",
         },
         "state": state,
         "last_error": None,
@@ -97,6 +98,8 @@ def test_start_command_uses_rpc(monkeypatch):
             "60",
             "--busy-threshold",
             "30",
+            "--workload",
+            "vector",
             "--job-id",
             "custom-job",
         ],
@@ -115,6 +118,7 @@ def test_start_command_uses_rpc(monkeypatch):
     assert params["vram"] == "2GiB"
     assert params["interval"] == 60
     assert params["busy_threshold"] == 30
+    assert params["workload"] == "vector"
     assert params["job_id"] == "custom-job"
     assert host == cli.DEFAULT_SERVICE_HOST
     assert port == cli.DEFAULT_SERVICE_PORT
@@ -2418,8 +2422,17 @@ def test_status_outputs_json_error_for_malformed_rpc_success_envelope(monkeypatc
 def test_blocking_mode_defaults_to_eco_safe_busy_threshold(monkeypatch):
     called = {}
 
-    def fake_run(interval, npu_ids, vram, legacy_threshold, busy_threshold):
-        called["args"] = (interval, npu_ids, vram, legacy_threshold, busy_threshold)
+    def fake_run(
+        interval, npu_ids, vram, legacy_threshold, busy_threshold, workload
+    ):
+        called["args"] = (
+            interval,
+            npu_ids,
+            vram,
+            legacy_threshold,
+            busy_threshold,
+            workload,
+        )
 
     monkeypatch.setattr(cli, "_run_blocking", fake_run)
     result = runner.invoke(
@@ -2428,14 +2441,23 @@ def test_blocking_mode_defaults_to_eco_safe_busy_threshold(monkeypatch):
     )
 
     assert result.exit_code == 0
-    assert called["args"] == (120, "0", "1GiB", None, 25)
+    assert called["args"] == (120, "0", "1GiB", None, 25, "aicore")
 
 
 def test_blocking_mode_preserves_explicit_unconditional_busy_threshold(monkeypatch):
     called = {}
 
-    def fake_run(interval, npu_ids, vram, legacy_threshold, busy_threshold):
-        called["args"] = (interval, npu_ids, vram, legacy_threshold, busy_threshold)
+    def fake_run(
+        interval, npu_ids, vram, legacy_threshold, busy_threshold, workload
+    ):
+        called["args"] = (
+            interval,
+            npu_ids,
+            vram,
+            legacy_threshold,
+            busy_threshold,
+            workload,
+        )
 
     monkeypatch.setattr(cli, "_run_blocking", fake_run)
     result = runner.invoke(
@@ -2453,7 +2475,7 @@ def test_blocking_mode_preserves_explicit_unconditional_busy_threshold(monkeypat
     )
 
     assert result.exit_code == 0
-    assert called["args"] == (120, "0", "1GiB", None, -1)
+    assert called["args"] == (120, "0", "1GiB", None, -1, "aicore")
 
 
 def test_blocking_mode_rejects_non_positive_interval(monkeypatch):
