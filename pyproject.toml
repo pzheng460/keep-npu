@@ -1,0 +1,146 @@
+[build-system]
+requires = [
+  "setuptools>=77.0.1",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "keep_npu"
+dynamic = ["version"]  # Let setuptools read the version dynamically
+description = "KeepNPU is a polite NPU keeper with CLI, service, and MCP interfaces"
+readme = {file = "README.md", content-type = "text/markdown"}
+requires-python = ">=3.9,<3.14"
+
+authors = [{name = "Peter Zheng"}]
+maintainers = [{name = "Peter Zheng"}]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+license = "MIT"
+dependencies = [
+  "typer",
+  "rich>=13.8.0",
+]
+
+[project.scripts]
+keep-npu = "keep_npu.cli:app"
+keep-npu-mcp-server = "keep_npu.mcp.server:main"
+
+[project.optional-dependencies]
+dev = [
+  "coverage",       # Testing
+  "mypy",           # Type checking
+  "pytest",         # Testing
+  "ruff",           # Linting
+  "black",          # Formatting
+  "pre-commit",    # Git hooks
+  "bump-my-version",   # Version management
+  "setuptools>=77,<82",  # Metadata parsing in package tests
+]
+ascend = []
+
+[project.urls]
+bugs = "https://github.com/pzheng460/keep-npu/issues"
+changelog = "https://github.com/pzheng460/keep-npu/releases"
+homepage = "https://github.com/pzheng460/keep-npu"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.package-data]
+"keep_npu.mcp" = [
+  "static/index.html",
+  "static/assets/*.css",
+  "static/assets/*.js",
+]
+
+# Dynamic version source: reads __version__ from keep_npu package
+[tool.setuptools.dynamic]
+version = {attr = "keep_npu.__version__"}
+
+# -----------------------------
+# bump-my-version configuration
+[tool.bumpversion]
+current_version = "1.0.0"
+commit          = true
+tag             = true
+tag_name        = "v{new_version}"
+allow_dirty     = true
+
+# Either 0.1.0   or 0.1.0.post3
+parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)(?:\\.post(?P<post>\\d+))?"
+
+# 1) default – no suffix       2) when bumping `post`
+serialize = [
+    "{major}.{minor}.{patch}",
+    "{major}.{minor}.{patch}.post{post}"
+]
+
+# Tell bump-my-version what to change
+search        = "{current_version}"
+replace       = "{new_version}"
+ignore_missing_version = false
+regex         = false     # use literal search unless you need RegEx
+
+# --- files that hold the version ---------------------------------
+[[tool.bumpversion.files]]
+filename = "src/keep_npu/__init__.py"
+
+[[tool.bumpversion.files]]
+filename  = "pyproject.toml"
+search    = 'current_version = "{current_version}"'
+replace   = 'current_version = "{new_version}"'
+
+# --- version-part specific behaviour -----------------------------
+# numeric by default for major/minor/patch – nothing to override
+[tool.bumpversion.parts.post]
+first_value    = "0"   # when the suffix first appears
+optional_value = ""    # omit `.postN` unless we’re bumping `post`
+
+
+# -----------------------------
+# Mypy type checking
+[tool.mypy]
+files = "."
+
+# Use strict defaults
+strict = true
+warn_unreachable = true
+warn_no_return = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+allow_untyped_defs = true
+disable_error_code = "attr-defined"
+
+# Black formatter
+[tool.black]
+line-length = 88
+target-version = ['py39']
+skip-string-normalization = false
+
+# Ruff linter
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+exclude = ["build", "dist", ".venv"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["keep_npu"]
+combine-as-imports = true
+force-single-line = false
+
+[tool.pytest.ini_options]
+markers = [
+  "ascend: tests that require Ascend hardware and torch_npu",
+  "large_memory: tests that use large VRAM",
+]
