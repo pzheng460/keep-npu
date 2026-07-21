@@ -137,6 +137,27 @@ def test_blocking_command_accepts_fractional_interval(monkeypatch):
     assert captured["interval"] == 0.5
 
 
+def test_blocking_command_reports_startup_failure_without_rich_traceback(monkeypatch):
+    monkeypatch.setattr(
+        cli,
+        "_run_blocking",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError(
+                "Failed to import torch/torch_npu. Install Ascend PyTorch first."
+            )
+        ),
+    )
+
+    result = runner.invoke(cli.app, ["--npu-ids", "4,5,6,7"])
+
+    assert result.exit_code == 1
+    assert result.output.strip() == (
+        "Error: Failed to import torch/torch_npu. Install Ascend PyTorch first."
+    )
+    assert "Traceback" not in result.output
+    assert "╭" not in result.output
+
+
 def test_run_blocking_preserves_ascend_visible_devices_for_npu_ids(monkeypatch):
     monkeypatch.setenv("ASCEND_RT_VISIBLE_DEVICES", "7")
     captured = {}

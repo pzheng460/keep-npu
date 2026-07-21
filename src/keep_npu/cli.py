@@ -1420,6 +1420,10 @@ def main(
         else:
             console.print(f"[bold red]Error: {exc}[/bold red]")
         raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        logger.debug("Blocking mode failed", exc_info=True)
+        console.print(f"Error: {exc}", style="bold red", markup=False)
+        raise typer.Exit(code=1) from exc
 
 
 @app.command("serve")
