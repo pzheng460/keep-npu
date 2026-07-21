@@ -4,8 +4,9 @@
 
 Change KeepNPU's default keepalive operation so a normal `keep-npu` invocation
 drives Ascend AI Core/Cube utilization, which is the value displayed as `UTL`
-by `nputop`. Users must not need a new workload flag. Existing public CLI,
-service, REST, JSON-RPC, MCP, and dashboard parameters remain unchanged.
+by `nputop`. Users must not need a workload flag for this default. An optional
+`workload` setting exposes the old Vector/ReLU behavior only when explicitly
+selected.
 
 The target command remains:
 
@@ -19,20 +20,23 @@ requested memory on each device.
 
 ## Chosen Approach
 
-The single-device controller will replace its elementwise ReLU workload with a
-preallocated FP16 matrix-multiplication workload. Ascend executes matrix
-multiplication on the Cube/AI Core pipeline, whereas ReLU primarily exercises
-the AI Vector pipeline and can leave `nputop` UTL at zero.
+The single-device controller will remove its elementwise ReLU workload and use
+a preallocated FP16 matrix-multiplication workload. Ascend executes matrix
+multiplication on the Cube/AI Core pipeline. ReLU primarily exercises the AI
+Vector pipeline, which common NPU utilization views do not count as AI Core
+utilization and which can leave `nputop` UTL at zero; it is therefore not a
+meaningful KeepNPU workload.
 
-No `--workload` option will be added. The matrix workload is the default and
-only public behavior. This keeps the user interface aligned with KeepGPU while
-making the backend operation appropriate for the metric Ascend users observe.
+The matrix workload is the default. ReLU is retained only as the explicit
+`--workload vector` compatibility mode and is never selected as an automatic
+fallback. Users do not write `aicore` in the normal command. This keeps the
+ordinary user flow aligned with KeepGPU while making the default backend
+operation appropriate for the metric Ascend users observe.
 
 Alternatives rejected:
 
-- Keeping ReLU as the default and adding `--workload aicore` would preserve the
-  old implementation but would make the desired NPU behavior opt-in and add an
-  NPU-only public option.
+- Keeping ReLU as the default and requiring `--workload aicore` would preserve
+  the old implementation but would make the desired NPU behavior opt-in.
 - Running a separate synthetic benchmark process would complicate lifecycle,
   device isolation, error propagation, and cleanup.
 - Using a fixed matrix size without accounting for `--vram` could exceed small
@@ -59,9 +63,9 @@ allocation element; the controller must never intentionally allocate a second
 full copy of the requested budget.
 
 If the requested budget is smaller than 1536 bytes (three 16-by-16 FP16
-matrices), startup fails with a concise actionable error. It must not silently
-fall back to the vector workload because that would again report zero `nputop`
-UTL.
+matrices), AI Core startup fails with a concise actionable error. It must not
+silently fall back to the vector workload because that would again report zero
+`nputop` UTL. Explicit vector mode retains the existing four-byte minimum.
 
 ## Runtime Semantics
 
@@ -105,25 +109,36 @@ runtime errors instead of raw Rich tracebacks.
 
 ## Public Compatibility
 
-There is no schema change. Blocking CLI, `start`, service session records,
-REST, JSON-RPC, MCP, and dashboard continue to accept and report:
+Blocking CLI and `start` accept `--workload` with exactly `aicore` and `vector`
+as valid values; it defaults to `aicore`. Service calls, REST, JSON-RPC, and MCP
+accept the matching optional `workload` field with the same validation and
+default. Session records report the normalized value. The dashboard provides a
+selector whose initial value is AI Core. Existing callers that omit the field
+therefore receive the new AI Core behavior without changing their request.
+
+The interfaces accept and report:
 
 - `npu_ids`
 - `vram`
 - `interval`
 - `busy_threshold`
+- `workload`
 - optional job identifiers where already supported
 
-Help text and documentation will clarify that the keepalive workload uses AI
-Core/Cube matrix multiplication and that `--busy-threshold -1` is the mode for
-unconditional maximum utilization. The documented command for devices 4-7
-will not contain an Ascend workload selector.
+Help text and documentation will clarify that the default keepalive workload
+uses AI Core/Cube matrix multiplication, `--workload vector` is a lightweight
+opt-in whose activity may not appear in `nputop` UTL, and
+`--busy-threshold -1` is the mode for unconditional maximum utilization. The
+documented maximum-UTL command for devices 4-7 will not contain a workload
+selector.
 
 ## Testing
 
 Local tests will be written before implementation and will cover:
 
 - default batches invoke `torch.matmul`, not `torch.relu_`;
+- explicit vector batches retain the existing ReLU behavior;
+- invalid workload values fail consistently through every public interface;
 - matrix and filler allocation stay within the requested byte budget;
 - dimensions are aligned and capped;
 - too-small budgets fail clearly;
@@ -131,7 +146,7 @@ Local tests will be written before implementation and will cover:
 - busy-threshold gating and unconditional mode retain their semantics;
 - only the selected device is set and used;
 - allocation, execution, and release failures retain existing lifecycle rules;
-- CLI and service contracts do not gain or require a workload parameter.
+- omitted workload values normalize to `aicore` through every public interface.
 
 The full existing test suite, package build, and installed-entry-point smoke
 tests must pass.
@@ -156,6 +171,9 @@ before/during/after evidence from `npu-smi` and the metric source used by
    its pre-test range.
 5. Default safe-threshold mode still backs off when total utilization is at or
    above its threshold, while `-1` runs unconditionally.
+
+Explicit vector mode will also receive a short smoke test confirming that it
+runs and releases, but its AI Core/`nputop` UTL is not an acceptance metric.
 
 If a 1 GiB budget cannot sustain the acceptance target with the initial
 4096-element matrix cap or 32-operation batch, those internal constants may be
