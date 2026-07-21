@@ -13,9 +13,11 @@ from keep_npu.utilities.logger import setup_logger
 from keep_npu.utilities.platform_manager import visible_torch_device_count
 from keep_npu.utilities.session_config import (
     DEFAULT_BUSY_THRESHOLD,
+    DEFAULT_WORKLOAD,
     validate_busy_threshold,
     validate_interval,
     validate_npu_ids,
+    validate_workload,
 )
 
 logger = setup_logger(__name__)
@@ -57,9 +59,11 @@ class GlobalNPUController:
         interval: Union[int, float] = 300,
         vram_to_keep: Union[int, str] = "1GiB",
         busy_threshold: int = DEFAULT_BUSY_THRESHOLD,
+        workload: str = DEFAULT_WORKLOAD,
     ):
         self.interval = validate_interval(interval)
         self.busy_threshold = validate_busy_threshold(busy_threshold)
+        self.workload = validate_workload(workload)
         parse_vram_to_elements(vram_to_keep)
         self.vram_to_keep = vram_to_keep
         npu_ids = validate_npu_ids(npu_ids)
@@ -70,6 +74,7 @@ class GlobalNPUController:
                 interval=self.interval,
                 vram_to_keep=self.vram_to_keep,
                 busy_threshold=self.busy_threshold,
+                workload=self.workload,
             )
             for rank in self.npu_ids
         ]
