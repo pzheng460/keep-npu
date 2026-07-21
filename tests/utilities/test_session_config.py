@@ -12,8 +12,8 @@ from keep_npu.utilities.session_config import (
     normalize_memory_byte_pair,
     normalize_memory_bytes,
     validate_busy_threshold,
-    validate_npu_ids,
     validate_interval,
+    validate_npu_ids,
     validate_rank_type,
     validate_visible_rank,
 )

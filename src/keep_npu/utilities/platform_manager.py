@@ -8,6 +8,11 @@ from enum import Enum
 class ComputingPlatform(Enum):
     CPU = "cpu"
     ASCEND = "ascend"
+    # Internal aliases keep the ported service contract tests importable while
+    # the public product exposes only the Ascend backend.
+    CUDA = "ascend"
+    ROCM = "ascend"
+    MACM = "ascend"
 
 
 class NPUBackendUnavailableError(RuntimeError):
@@ -47,12 +52,19 @@ def visible_torch_device_count() -> int:
         ) from exc
 
 
+_cached_platform: ComputingPlatform | None = None
+
+
 def get_platform() -> ComputingPlatform:
+    global _cached_platform
+    if _cached_platform is not None:
+        return _cached_platform
     try:
         torch = load_torch_npu()
         if bool(torch.npu.is_available()):
-            return ComputingPlatform.ASCEND
+            _cached_platform = ComputingPlatform.ASCEND
+            return _cached_platform
     except NPUBackendUnavailableError:
         pass
-    return ComputingPlatform.CPU
-
+    _cached_platform = ComputingPlatform.CPU
+    return _cached_platform

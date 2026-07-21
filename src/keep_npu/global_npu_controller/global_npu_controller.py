@@ -18,7 +18,11 @@ from keep_npu.utilities.session_config import (
 )
 
 
-class NoNPUAvailableError(ValueError):
+class ControllerStartupUnavailable(Exception):
+    """Expected Ascend hardware/runtime unavailability during startup."""
+
+
+class NoNPUAvailableError(ControllerStartupUnavailable, ValueError):
     pass
 
 
@@ -27,7 +31,10 @@ class InvalidVisibleNPUSelectionError(ValueError):
 
 
 def _resolve_visible_npu_ids(npu_ids: Optional[List[int]]) -> List[int]:
-    count = visible_torch_device_count()
+    try:
+        count = visible_torch_device_count()
+    except Exception as exc:
+        raise NoNPUAvailableError(str(exc)) from exc
     if count <= 0:
         raise NoNPUAvailableError("No NPUs available for GlobalNPUController")
     if npu_ids is None:
@@ -114,4 +121,3 @@ class GlobalNPUController:
 
     def __exit__(self, exc_type, exc, tb):
         self.release()
-

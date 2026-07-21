@@ -158,3 +158,7 @@ def get_npu_utilization(rank: int) -> Optional[int]:
             return int(value) if value is not None else None
     return None
 
+
+def get_npu_info() -> List[Dict[str, Any]]:
+    """Backward-compatible internal name used by the shared service."""
+    return list_npus()
