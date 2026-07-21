@@ -232,6 +232,36 @@ def test_aicore_batch_observes_stop_event(monkeypatch):
     assert fake.matmul_calls == 2
 
 
+def test_unconditional_mode_does_not_sleep_between_compute_batches(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    controller = module.AscendNPUController(
+        rank=0,
+        interval=60,
+        vram_to_keep="1MiB",
+        busy_threshold=-1,
+    )
+
+    class RecordingEvent:
+        def __init__(self):
+            self.wait_calls = []
+
+        def is_set(self):
+            return False
+
+        def wait(self, timeout):
+            self.wait_calls.append(timeout)
+            return False
+
+    stop_evt = RecordingEvent()
+
+    assert controller._wait_for_next_check(stop_evt) is False
+    assert stop_evt.wait_calls == []
+
+
 def test_controller_surfaces_startup_device_failure(monkeypatch):
     from keep_npu.single_npu_controller import ascend_npu_controller as module
 

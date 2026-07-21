@@ -231,7 +231,7 @@ class AscendNPUController(BaseNPUController):
                 utilization = self._current_utilization()
                 if self._should_run_batch(utilization, self.busy_threshold):
                     self._run_batch(tensors)
-                if stop_evt.wait(self.interval):
+                if self._wait_for_next_check(stop_evt):
                     break
             except Exception as exc:
                 self._failure_exc = RuntimeError(
@@ -284,6 +284,11 @@ class AscendNPUController(BaseNPUController):
         if self.busy_threshold < 0:
             return None
         return self._monitor_utilization(self.rank)
+
+    def _wait_for_next_check(self, stop_evt: threading.Event) -> bool:
+        if self.busy_threshold < 0:
+            return stop_evt.is_set()
+        return stop_evt.wait(self.interval)
 
     def allocation_status(self) -> Optional[Exception]:
         return self._failure_exc
