@@ -82,6 +82,13 @@ export function parseBusyThreshold(value) {
   return parsed
 }
 
+export function parseWorkload(value) {
+  if (value !== "aicore" && value !== "vector") {
+    throw new Error("Workload must be aicore or vector")
+  }
+  return value
+}
+
 export function buildSessionPayload(form) {
   const trimmedVram = form.vram.trim()
   if (!trimmedVram) {
@@ -92,7 +99,8 @@ export function buildSessionPayload(form) {
     npu_ids: parseNpuIds(form.npuIds),
     vram: trimmedVram,
     interval: parsePositiveNumber(form.interval, "Interval"),
-    busy_threshold: parseBusyThreshold(form.busyThreshold)
+    busy_threshold: parseBusyThreshold(form.busyThreshold),
+    workload: parseWorkload(form.workload)
   }
 }
 

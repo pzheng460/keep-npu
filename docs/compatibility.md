@@ -26,8 +26,10 @@ Intentional backend differences:
 - `npu-smi` formats differ across Ascend products and driver versions. KeepNPU
   treats telemetry as best effort and returns nullable metrics when a value
   cannot be established safely.
-- KeepNPU allocates float32 chunks and performs the same 5,000-pass in-place
-  ReLU keep-alive batch used by KeepGPU. Its busy threshold uses Ascend's total
-  NPU utilization so AI Vector work is included even when `AICore(%)` is zero.
+- KeepNPU defaults to preallocated FP16 matrix multiplication on Ascend's AI
+  Core/Cube pipeline so the workload appears in `nputop` UTL. The optional
+  `--workload vector` extension retains the 5,000-pass in-place ReLU batch for
+  users who explicitly prefer a lighter AI Vector workload. Its busy threshold
+  uses Ascend's total NPU utilization, including AI Vector work.
 - Hardware/vendor setup is not declared as a PyPI dependency because PyTorch,
   `torch_npu`, CANN, and the driver must be installed as a compatible set.

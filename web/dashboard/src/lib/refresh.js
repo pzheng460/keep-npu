@@ -94,7 +94,8 @@ function isValidSessionRecord(session) {
     params.interval > 0 &&
     Number.isInteger(params.busy_threshold) &&
     (params.busy_threshold === -1 ||
-      (params.busy_threshold >= 0 && params.busy_threshold <= 100))
+      (params.busy_threshold >= 0 && params.busy_threshold <= 100)) &&
+    (params.workload === "aicore" || params.workload === "vector")
   )
 }
 
