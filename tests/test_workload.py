@@ -29,10 +29,10 @@ def test_aicore_plan_is_aligned_capped_and_inside_budget():
 
     plan = plan_aicore_workload(budget_elements)
 
-    assert plan.matrix_dim == 8192
+    assert plan.matrix_dim == 12288
     assert plan.matrix_dim % 16 == 0
     assert budget_elements * 4 - 3 <= plan.allocated_bytes <= budget_elements * 4
     assert (
         plan.allocated_bytes
-        == 3 * 8192 * 8192 * 2 + plan.filler_elements * 4
+        == 3 * 12288 * 12288 * 2 + plan.filler_elements * 4
     )
