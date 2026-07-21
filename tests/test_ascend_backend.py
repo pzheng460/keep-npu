@@ -94,7 +94,7 @@ def test_controller_rejects_invalid_rank_before_backend_probe(monkeypatch):
         module.AscendNPUController(rank="0", vram_to_keep=4)
 
 
-def test_controller_default_workload_is_one_lightweight_pass(monkeypatch):
+def test_controller_default_workload_matches_keep_gpu_busy_batch(monkeypatch):
     from keep_npu.single_npu_controller import ascend_npu_controller as module
 
     fake = FakeTorch(count=1)
@@ -103,7 +103,7 @@ def test_controller_default_workload_is_one_lightweight_pass(monkeypatch):
 
     controller = module.AscendNPUController(rank=0, vram_to_keep=4)
 
-    assert controller.iterations == 1
+    assert controller.iterations == 5000
 
 
 def test_controller_unknown_utilization_defers_allocation(monkeypatch):

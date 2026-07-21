@@ -17,6 +17,14 @@ ASCEND_25_SAMPLE = """
 | 0                         | 0000:01:00.0  | 0           0    / 0          3440 / 65536         |
 """
 
+ASCEND_USAGE_SAMPLE = """
+    NPU ID                         : 7
+    Aicore Usage Rate(%)           : 0
+    Aivector Usage Rate(%)         : 99
+    HBM Bandwidth Usage Rate(%)    : 100
+    NPU Utilization(%)             : 100
+"""
+
 
 def test_parse_npu_smi_output_normalizes_records():
     assert parse_npu_smi_output(SAMPLE) == [
@@ -76,15 +84,41 @@ def test_list_npus_does_not_create_contexts_on_enumerated_devices(monkeypatch):
             for rank in range(4)
         ],
     )
+    monkeypatch.setattr(
+        npu_info,
+        "_run_npu_smi_usage",
+        lambda physical_id: 80 + physical_id,
+        raising=False,
+    )
     monkeypatch.delenv("ASCEND_RT_VISIBLE_DEVICES", raising=False)
 
     records = npu_info.list_npus()
 
     assert [record["visible_id"] for record in records] == [0, 1, 2, 3]
     assert [record["physical_id"] for record in records] == [0, 1, 2, 3]
+    assert [record["utilization"] for record in records] == [80, 81, 82, 83]
     assert [record["memory_used"] for record in records] == [
         0,
         1024**3,
         2 * 1024**3,
         3 * 1024**3,
     ]
+
+
+def test_parse_usage_prefers_total_npu_utilization_over_aicore():
+    assert npu_info.parse_npu_smi_usage_output(ASCEND_USAGE_SAMPLE) == 100
+
+
+def test_get_npu_utilization_queries_selected_physical_device(monkeypatch):
+    queried = []
+    monkeypatch.setattr(npu_info, "visible_torch_device_count", lambda: 4)
+    monkeypatch.setattr(
+        npu_info,
+        "_run_npu_smi_usage",
+        lambda physical_id: queried.append(physical_id) or 100,
+        raising=False,
+    )
+    monkeypatch.setenv("ASCEND_RT_VISIBLE_DEVICES", "4,5,6,7")
+
+    assert npu_info.get_npu_utilization(3) == 100
+    assert queried == [7]

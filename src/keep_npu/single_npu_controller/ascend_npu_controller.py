@@ -31,7 +31,7 @@ class AscendNPUController(BaseNPUController):
         *,
         rank: int,
         interval: float = 1.0,
-        iterations: int = 1,
+        iterations: int = 5000,
         vram_to_keep: str | int = "1GiB",
         busy_threshold: int = DEFAULT_BUSY_THRESHOLD,
     ):
