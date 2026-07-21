@@ -24,11 +24,19 @@ from keep_npu.utilities.platform_manager import (
 
 
 class DummyController:
-    def __init__(self, npu_ids=None, interval=0, vram_to_keep=None, busy_threshold=0):
+    def __init__(
+        self,
+        npu_ids=None,
+        interval=0,
+        vram_to_keep=None,
+        busy_threshold=0,
+        workload="aicore",
+    ):
         self.npu_ids = npu_ids
         self.interval = interval
         self.vram_to_keep = vram_to_keep
         self.busy_threshold = busy_threshold
+        self.workload = workload
         self.kept = False
         self.released = False
 
@@ -1829,8 +1837,9 @@ def test_http_status_reports_runtime_failed_session():
                 "params": {
                     "npu_ids": [0],
                     "vram": "256MB",
-                    "interval": 20,
-                    "busy_threshold": 25,
+                        "interval": 20,
+                        "busy_threshold": 25,
+                        "workload": "aicore",
                 },
                 "state": "runtime_failed",
                 "last_error": "rank 0: allocation retries exhausted",
@@ -2264,9 +2273,10 @@ def test_http_status_reports_starting_session_during_controller_keep():
         expected_params = {
             "npu_ids": [0],
             "vram": "512MB",
-            "interval": 7,
-            "busy_threshold": 25,
-        }
+                "interval": 7,
+                "busy_threshold": 25,
+                "workload": "aicore",
+            }
         _, list_payload = _request_json("GET", f"{base}/api/sessions")
         assert list_payload["active_jobs"] == [
             {
