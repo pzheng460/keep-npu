@@ -1,5 +1,4 @@
 import math
-import uuid
 
 import pytest
 
@@ -177,7 +176,14 @@ def test_validate_busy_threshold_rejects_non_plain_integers(value):
 
 @pytest.mark.parametrize(
     "value",
-    [None, "job-123", "job_123", "job.123", "job~123", str(uuid.uuid4())],
+    [
+        None,
+        "job-123",
+        "job_123",
+        "job.123",
+        "job~123",
+        "12345678-1234-5678-1234-567812345678",
+    ],
 )
 def test_validate_job_id_accepts_omitted_and_url_path_safe_strings(value):
     assert session_config.validate_job_id(value) == value
