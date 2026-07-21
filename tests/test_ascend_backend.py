@@ -153,7 +153,13 @@ def test_controller_unconditional_mode_allocates_runs_and_releases(monkeypatch):
     fake = FakeTorch(count=1)
     monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
     monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
-    monkeypatch.setattr(module, "get_npu_utilization", lambda rank: 100)
+    monkeypatch.setattr(
+        module,
+        "get_npu_utilization",
+        lambda rank: (_ for _ in ()).throw(
+            AssertionError("unconditional mode must skip telemetry")
+        ),
+    )
     controller = module.AscendNPUController(
         rank=0,
         interval=0.01,

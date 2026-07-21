@@ -202,7 +202,7 @@ class AscendNPUController(BaseNPUController):
         tensors = None
         while not stop_evt.is_set():
             try:
-                utilization = self._monitor_utilization(self.rank)
+                utilization = self._current_utilization()
                 if not self._should_run_batch(utilization, self.busy_threshold):
                     confirm_startup()
                     if stop_evt.wait(self.interval):
@@ -228,7 +228,7 @@ class AscendNPUController(BaseNPUController):
             return
         while not stop_evt.is_set():
             try:
-                utilization = self._monitor_utilization(self.rank)
+                utilization = self._current_utilization()
                 if self._should_run_batch(utilization, self.busy_threshold):
                     self._run_batch(tensors)
                 if stop_evt.wait(self.interval):
@@ -279,6 +279,11 @@ class AscendNPUController(BaseNPUController):
     @staticmethod
     def _monitor_utilization(rank: int) -> Optional[int]:
         return get_npu_utilization(rank)
+
+    def _current_utilization(self) -> Optional[int]:
+        if self.busy_threshold < 0:
+            return None
+        return self._monitor_utilization(self.rank)
 
     def allocation_status(self) -> Optional[Exception]:
         return self._failure_exc
