@@ -26,30 +26,68 @@ _TABLE_ROW = re.compile(
     r"(?P<used>[0-9]+)\s*/\s*(?P<total>[0-9]+)\s*\|?\s*$",
     re.IGNORECASE,
 )
+_ASCEND_25_DEVICE_ROW = re.compile(
+    r"^\|\s*(?P<id>[0-9]+)\s+(?P<name>[^|]+?)\s*\|\s*[A-Za-z]+\s*\|"
+)
+_ASCEND_25_TELEMETRY_ROW = re.compile(
+    r"^\|\s*[0-9]+\s*\|\s*[^|]+\|\s*(?P<util>[0-9]+)\s+"
+    r"[0-9]+\s*/\s*[0-9]+\s+(?P<used>[0-9]+)\s*/\s*(?P<total>[0-9]+)\s*\|"
+)
+
+
+def _telemetry_record(
+    physical_id: int, name: str, utilization_mb: str, used_mb: str, total_mb: str
+) -> Dict[str, Any]:
+    total = int(total_mb) * 1024**2
+    used = int(used_mb) * 1024**2
+    total, used = normalize_memory_byte_pair(total, used)
+    utilization = normalize_utilization_percent(int(utilization_mb))
+    return {
+        "physical_id": physical_id,
+        "name": name.strip(),
+        "memory_total": total,
+        "memory_used": used,
+        "utilization": int(utilization) if utilization is not None else None,
+    }
 
 
 def parse_npu_smi_output(output: str) -> List[Dict[str, Any]]:
-    """Parse the common one-row-per-device ``npu-smi info`` table format."""
+    """Parse one-line and Ascend 25.x two-line ``npu-smi info`` tables."""
     records: List[Dict[str, Any]] = []
+    pending_device: Optional[tuple[int, str]] = None
     for line in output.splitlines():
-        match = _TABLE_ROW.match(line.strip())
-        if match is None:
+        stripped = line.strip()
+        match = _TABLE_ROW.match(stripped)
+        if match is not None:
+            records.append(
+                _telemetry_record(
+                    int(match.group("id")),
+                    match.group("name"),
+                    match.group("util"),
+                    match.group("used"),
+                    match.group("total"),
+                )
+            )
+            pending_device = None
             continue
-        total = int(match.group("total")) * 1024**2
-        used = int(match.group("used")) * 1024**2
-        total, used = normalize_memory_byte_pair(total, used)
-        utilization = normalize_utilization_percent(int(match.group("util")))
-        records.append(
-            {
-                "physical_id": int(match.group("id")),
-                "name": match.group("name").strip(),
-                "memory_total": total,
-                "memory_used": used,
-                "utilization": (
-                    int(utilization) if utilization is not None else None
-                ),
-            }
-        )
+        header = _ASCEND_25_DEVICE_ROW.match(stripped)
+        if header is not None:
+            pending_device = (int(header.group("id")), header.group("name").strip())
+            continue
+        telemetry = _ASCEND_25_TELEMETRY_ROW.match(stripped)
+        if telemetry is not None and pending_device is not None:
+            records.append(
+                _telemetry_record(
+                    pending_device[0],
+                    pending_device[1],
+                    telemetry.group("util"),
+                    telemetry.group("used"),
+                    telemetry.group("total"),
+                )
+            )
+            pending_device = None
+        elif stripped.startswith("+"):
+            pending_device = None
     return records
 
 
