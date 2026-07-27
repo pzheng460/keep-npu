@@ -215,6 +215,9 @@ def test_run_blocking_preserves_ascend_visible_devices_for_npu_ids(monkeypatch):
         def __exit__(self, exc_type, exc, tb):
             captured["exited"] = True
 
+        def runtime_error(self):
+            return None
+
     import keep_npu.global_npu_controller.global_npu_controller as global_module
 
     monkeypatch.setattr(global_module, "GlobalNPUController", DummyGlobalController)
@@ -258,6 +261,9 @@ def test_run_blocking_installs_and_restores_sigterm_handler(monkeypatch):
         def __exit__(self, exc_type, exc, tb):
             captured["exited"] = True
 
+        def runtime_error(self):
+            return None
+
     import keep_npu.global_npu_controller.global_npu_controller as global_module
 
     previous_handler = object()
@@ -286,6 +292,46 @@ def test_run_blocking_installs_and_restores_sigterm_handler(monkeypatch):
     assert captured["signal_calls"][-1] == (cli.signal.SIGTERM, previous_handler)
 
 
+def test_run_blocking_surfaces_worker_failure_and_releases_controller(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class RuntimeFailedGlobalController:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            captured["entered"] = True
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            captured["exit_exception"] = exc
+
+        def runtime_error(self):
+            return RuntimeError(
+                "rank 0: unexpected Ascend keep worker failure: CANN stream failed"
+            )
+
+    import keep_npu.global_npu_controller.global_npu_controller as global_module
+
+    monkeypatch.setattr(
+        global_module, "GlobalNPUController", RuntimeFailedGlobalController
+    )
+    monkeypatch.setattr(
+        cli.time,
+        "sleep",
+        lambda _seconds: (_ for _ in ()).throw(KeyboardInterrupt),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="rank 0: unexpected Ascend keep worker failure: CANN stream failed",
+    ):
+        cli._run_blocking(1, "0", "1MiB", None, -1)
+
+    assert captured["entered"] is True
+    assert isinstance(captured["exit_exception"], RuntimeError)
+
+
 def test_run_blocking_defers_omitted_npu_enumeration_to_global_controller(
     monkeypatch,
 ):
@@ -307,6 +353,9 @@ def test_run_blocking_defers_omitted_npu_enumeration_to_global_controller(
 
         def __exit__(self, exc_type, exc, tb):
             captured["exited"] = True
+
+        def runtime_error(self):
+            return None
 
     import keep_npu.global_npu_controller.global_npu_controller as global_module
 
@@ -364,6 +413,9 @@ def test_run_blocking_logs_busy_threshold_semantically(
             return self
 
         def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def runtime_error(self):
             return None
 
     import keep_npu.global_npu_controller.global_npu_controller as global_module

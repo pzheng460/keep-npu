@@ -1383,7 +1383,10 @@ def _run_blocking(
             with global_controller:
                 logger.info("Keeping NPUs awake. Press Ctrl+C to exit.")
                 while True:
-                    time.sleep(3600)
+                    runtime_error = global_controller.runtime_error()
+                    if runtime_error is not None:
+                        raise runtime_error
+                    time.sleep(1.0)
         except KeyboardInterrupt:
             logger.info("Interruption received. Releasing NPUs...")
     finally:
