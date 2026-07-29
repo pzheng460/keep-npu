@@ -60,6 +60,7 @@ def test_validate_cli_busy_threshold_rejects_non_canonical_numeric_tokens(
 
 
 def test_validate_cli_workload_accepts_public_values():
+    assert cli._validate_cli_workload("mixed") == "mixed"
     assert cli._validate_cli_workload("aicore") == "aicore"
     assert cli._validate_cli_workload("vector") == "vector"
 
@@ -156,7 +157,7 @@ def test_blocking_command_accepts_fractional_interval(monkeypatch):
 
     assert result.exit_code == 0
     assert captured["interval"] == 0.5
-    assert captured["workload"] == "aicore"
+    assert captured["workload"] == "mixed"
 
 
 def test_blocking_command_accepts_explicit_vector_workload(monkeypatch):
@@ -230,7 +231,7 @@ def test_run_blocking_preserves_ascend_visible_devices_for_npu_ids(monkeypatch):
     cli._run_blocking(
         interval=1,
         npu_ids="3",
-        vram="1MiB",
+        vram="1GiB",
         legacy_threshold=None,
         busy_threshold=-1,
     )
@@ -239,9 +240,9 @@ def test_run_blocking_preserves_ascend_visible_devices_for_npu_ids(monkeypatch):
     assert captured == {
         "npu_ids": [3],
         "interval": 1,
-        "vram_to_keep": "1MiB",
+        "vram_to_keep": "1GiB",
         "busy_threshold": -1,
-        "workload": "aicore",
+        "workload": "mixed",
         "entered": True,
         "exited": True,
     }
@@ -284,7 +285,7 @@ def test_run_blocking_installs_and_restores_sigterm_handler(monkeypatch):
     monkeypatch.setattr(cli.signal, "signal", fake_signal)
     monkeypatch.setattr(cli.time, "sleep", terminate_sleep)
 
-    cli._run_blocking(1, "0", "1MiB", None, -1)
+    cli._run_blocking(1, "0", "1GiB", None, -1)
 
     assert captured["entered"] is True
     assert captured["exited"] is True
@@ -326,7 +327,7 @@ def test_run_blocking_surfaces_worker_failure_and_releases_controller(monkeypatc
         RuntimeError,
         match="rank 0: unexpected Ascend keep worker failure: CANN stream failed",
     ):
-        cli._run_blocking(1, "0", "1MiB", None, -1)
+        cli._run_blocking(1, "0", "1GiB", None, -1)
 
     assert captured["entered"] is True
     assert isinstance(captured["exit_exception"], RuntimeError)
@@ -369,7 +370,7 @@ def test_run_blocking_defers_omitted_npu_enumeration_to_global_controller(
     cli._run_blocking(
         interval=1,
         npu_ids=None,
-        vram="1MiB",
+        vram="1GiB",
         legacy_threshold=None,
         busy_threshold=-1,
     )
@@ -377,9 +378,9 @@ def test_run_blocking_defers_omitted_npu_enumeration_to_global_controller(
     assert captured == {
         "npu_ids": None,
         "interval": 1,
-        "vram_to_keep": "1MiB",
+        "vram_to_keep": "1GiB",
         "busy_threshold": -1,
-        "workload": "aicore",
+        "workload": "mixed",
         "entered": True,
         "exited": True,
     }
@@ -432,7 +433,7 @@ def test_run_blocking_logs_busy_threshold_semantically(
     cli._run_blocking(
         interval=1,
         npu_ids="0",
-        vram="1MiB",
+        vram="1GiB",
         legacy_threshold=None,
         busy_threshold=busy_threshold,
     )

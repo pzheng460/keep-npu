@@ -184,7 +184,7 @@ def test_start_status_stop_cycle():
     assert status["params"]["vram"] == "2GiB"
     assert status["params"]["interval"] == 5
     assert status["params"]["busy_threshold"] == 20
-    assert status["params"]["workload"] == "aicore"
+    assert status["params"]["workload"] == "mixed"
 
     stopped = server.stop_keep(job_id)
     assert job_id in stopped["stopped"]
@@ -207,7 +207,7 @@ def test_status_returns_param_snapshots_for_active_sessions():
         "vram": "1GiB",
         "interval": 300,
         "busy_threshold": 25,
-        "workload": "aicore",
+        "workload": "mixed",
     }
 
 
@@ -293,7 +293,7 @@ def test_status_list_marks_runtime_failed_sessions():
                 "vram": "1GiB",
                 "interval": 300,
                 "busy_threshold": 25,
-                "workload": "aicore",
+                "workload": "mixed",
             },
             "state": "runtime_failed",
             "last_error": "rank 0: allocation retries exhausted",
@@ -527,7 +527,7 @@ def test_status_reports_starting_session_during_controller_keep():
             "vram": "512MB",
             "interval": 7,
             "busy_threshold": 25,
-            "workload": "aicore",
+            "workload": "mixed",
         }
         assert server.status("starting-job") == {
             "active": True,
@@ -1599,6 +1599,7 @@ def test_mcp_tools_list_exposes_keepnpu_actions():
     assert start_schema["properties"]["vram"]["minimum"] == 4
     assert start_schema["properties"]["vram"]["maximum"] == PUBLIC_VRAM_MAX_BYTES
     vram_description = start_schema["properties"]["vram"]["description"]
+    assert "Mixed requires at least 67110400 bytes" in vram_description
     assert "AI Core requires at least 1536 bytes" in vram_description
     assert "Vector requires at least 4 bytes" in vram_description
     assert "above 1 PiB" in vram_description
@@ -1607,8 +1608,12 @@ def test_mcp_tools_list_exposes_keepnpu_actions():
     assert start_schema["properties"]["interval"]["exclusiveMinimum"] == 0
     assert start_schema["properties"]["busy_threshold"]["default"] == 25
     workload_schema = start_schema["properties"]["workload"]
-    assert workload_schema["enum"] == ["aicore", "vector"]
-    assert workload_schema["default"] == "aicore"
+    assert workload_schema["enum"] == ["mixed", "aicore", "vector"]
+    assert workload_schema["default"] == "mixed"
+    assert {
+        "if": {"properties": {"workload": {"const": "mixed"}}},
+        "then": {"properties": {"vram": {"minimum": 67110400}}},
+    } in start_schema["allOf"]
     assert {
         "if": {"properties": {"workload": {"const": "aicore"}}},
         "then": {"properties": {"vram": {"minimum": 1536}}},
@@ -1899,7 +1904,7 @@ def test_mcp_tools_call_validates_cheap_inputs_before_listed_npus(monkeypatch):
         server.shutdown()
 
 
-def test_small_default_aicore_budget_is_invalid_params_before_listed_npus(monkeypatch):
+def test_small_default_mixed_budget_is_invalid_params_before_listed_npus(monkeypatch):
     server = KeepNPUServer()
     monkeypatch.setattr(
         server,
@@ -1930,9 +1935,9 @@ def test_small_default_aicore_budget_is_invalid_params_before_listed_npus(monkey
     )
 
     assert direct["error"]["code"] == JSONRPC_INVALID_PARAMS
-    assert "at least 1536 bytes" in direct["error"]["message"]
+    assert "at least 67110400 bytes" in direct["error"]["message"]
     assert tool["result"]["isError"] is True
-    assert "at least 1536 bytes" in tool["result"]["content"][0]["text"]
+    assert "at least 67110400 bytes" in tool["result"]["content"][0]["text"]
     assert server.status()["active_jobs"] == []
 
 

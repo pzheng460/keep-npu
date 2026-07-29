@@ -52,7 +52,10 @@ from keep_npu.global_npu_controller.global_npu_controller import (
     GlobalNPUController,
     InvalidVisibleNPUSelectionError,
 )
-from keep_npu.single_npu_controller.workload import validate_workload_vram
+from keep_npu.single_npu_controller.workload import (
+    MIN_MIXED_BYTES,
+    validate_workload_vram,
+)
 from keep_npu.utilities.endpoint_validation import validate_endpoint
 from keep_npu.utilities.humanized_input import (
     PUBLIC_VRAM_MAX_BYTES,
@@ -129,9 +132,13 @@ MCP_TOOLS: List[Dict[str, Any]] = [
             "type": "object",
             "allOf": [
                 {
+                    "if": {"properties": {"workload": {"const": "mixed"}}},
+                    "then": {"properties": {"vram": {"minimum": MIN_MIXED_BYTES}}},
+                },
+                {
                     "if": {"properties": {"workload": {"const": "aicore"}}},
                     "then": {"properties": {"vram": {"minimum": 1536}}},
-                }
+                },
             ],
             "properties": {
                 "npu_ids": {
@@ -147,7 +154,7 @@ MCP_TOOLS: List[Dict[str, Any]] = [
                     "minimum": 4,
                     "maximum": PUBLIC_VRAM_MAX_BYTES,
                     "default": "1GiB",
-                    "description": "Human-readable VRAM amount or integer bytes to keep; AI Core requires at least 1536 bytes, Vector requires at least 4 bytes, values above 1 PiB are rejected, and internal element counts round up.",
+                    "description": f"Human-readable VRAM amount or integer bytes to keep; Mixed requires at least {MIN_MIXED_BYTES} bytes, AI Core requires at least 1536 bytes, Vector requires at least 4 bytes, values above 1 PiB are rejected, and internal element counts round up.",
                 },
                 "interval": {
                     "type": "number",
@@ -165,9 +172,9 @@ MCP_TOOLS: List[Dict[str, Any]] = [
                 },
                 "workload": {
                     "type": "string",
-                    "enum": ["aicore", "vector"],
+                    "enum": ["mixed", "aicore", "vector"],
                     "default": DEFAULT_WORKLOAD,
-                    "description": "AI Core matmul by default; vector selects lightweight ReLU.",
+                    "description": "Mixed Cube, Vector, and HBM pressure by default; aicore and vector select single-engine compatibility modes.",
                 },
                 "job_id": {
                     "type": ["string", "null"],
@@ -500,7 +507,8 @@ class KeepNPUServer:
                 values back off when utilization is above this percent or
                 telemetry is unavailable; ``-1`` disables utilization backoff
                 for unconditional keepalive.
-            workload: ``aicore`` by default, or explicit ``vector`` for ReLU.
+            workload: ``mixed`` by default; explicit ``aicore`` and ``vector``
+                select single-engine compatibility modes.
             job_id: Optional session identifier; a UUID is generated if omitted.
 
         Returns:

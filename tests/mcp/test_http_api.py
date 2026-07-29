@@ -809,7 +809,7 @@ def test_http_raw_double_slash_api_sessions_post_returns_404_without_start():
             {
                 "job_id": "double-slash-start",
                 "npu_ids": [0],
-                "vram": "64MB",
+                "vram": "128MB",
                 "interval": 20,
                 "busy_threshold": 5,
             },
@@ -837,7 +837,7 @@ def test_http_raw_double_slash_api_session_delete_returns_404_without_stop():
             {
                 "job_id": "double-slash-stop",
                 "npu_ids": [0],
-                "vram": "64MB",
+                "vram": "128MB",
                 "interval": 20,
                 "busy_threshold": 5,
             },
@@ -870,7 +870,7 @@ def test_http_double_encoded_api_sessions_post_returns_404_without_start():
             {
                 "job_id": "double-encoded-start",
                 "npu_ids": [0],
-                "vram": "64MB",
+                "vram": "128MB",
                 "interval": 20,
                 "busy_threshold": 5,
             },
@@ -898,7 +898,7 @@ def test_http_double_encoded_api_session_delete_returns_404_without_stop():
             {
                 "job_id": "double-encoded-stop",
                 "npu_ids": [0],
-                "vram": "64MB",
+                "vram": "128MB",
                 "interval": 20,
                 "busy_threshold": 5,
             },
@@ -1839,7 +1839,7 @@ def test_http_status_reports_runtime_failed_session():
                     "vram": "256MB",
                         "interval": 20,
                         "busy_threshold": 25,
-                        "workload": "aicore",
+                        "workload": "mixed",
                 },
                 "state": "runtime_failed",
                 "last_error": "rank 0: allocation retries exhausted",
@@ -2275,7 +2275,7 @@ def test_http_status_reports_starting_session_during_controller_keep():
             "vram": "512MB",
                 "interval": 7,
                 "busy_threshold": 25,
-                "workload": "aicore",
+                "workload": "mixed",
             }
         _, list_payload = _request_json("GET", f"{base}/api/sessions")
         assert list_payload["active_jobs"] == [
@@ -2404,7 +2404,7 @@ def test_http_session_trailing_slash_rejected():
             f"{base}/api/sessions",
             {
                 "npu_ids": [0],
-                "vram": "64MB",
+                "vram": "128MB",
                 "interval": 20,
                 "busy_threshold": 5,
             },
@@ -2899,7 +2899,7 @@ def test_http_post_rejects_unknown_fields():
             f"{base}/api/sessions",
             {
                 "npu_ids": [0],
-                "vram": "64MB",
+                "vram": "128MB",
                 "interval": 20,
                 "busy_threshold": 5,
                 "unexpected": "value",
@@ -2951,7 +2951,7 @@ def test_http_post_rejects_non_positive_interval():
             f"{base}/api/sessions",
             {
                 "npu_ids": [0],
-                "vram": "64MB",
+                "vram": "128MB",
                 "interval": 0,
                 "busy_threshold": 5,
             },
@@ -2965,7 +2965,7 @@ def test_http_post_rejects_non_positive_interval():
         thread.join(timeout=2)
 
 
-def test_http_post_rejects_small_default_aicore_budget_before_inventory(monkeypatch):
+def test_http_post_rejects_small_default_mixed_budget_before_inventory(monkeypatch):
     server = make_server()
     monkeypatch.setattr(
         server,
@@ -2982,7 +2982,7 @@ def test_http_post_rejects_small_default_aicore_budget_before_inventory(monkeypa
         )
 
         assert status_code == 400
-        assert "at least 1536 bytes" in payload["error"]["message"]
+        assert "at least 67110400 bytes" in payload["error"]["message"]
         assert server.status()["active_jobs"] == []
     finally:
         httpd.shutdown()
@@ -3001,7 +3001,7 @@ def test_http_post_rejects_nan_interval_as_bad_json_without_creating_session():
             f"{base}/api/sessions",
             {
                 "npu_ids": [0],
-                "vram": "64MB",
+                "vram": "128MB",
                 "interval": math.nan,
                 "busy_threshold": 5,
             },
@@ -3036,7 +3036,7 @@ def test_http_post_rejects_empty_npu_ids():
             f"{base}/api/sessions",
             {
                 "npu_ids": [],
-                "vram": "64MB",
+                "vram": "128MB",
                 "interval": 20,
                 "busy_threshold": 5,
             },
@@ -3070,7 +3070,7 @@ def test_http_post_rejects_duplicate_npu_ids():
             f"{base}/api/sessions",
             {
                 "npu_ids": [0, 1, 0],
-                "vram": "64MB",
+                "vram": "128MB",
                 "interval": 20,
                 "busy_threshold": 5,
             },
@@ -3106,7 +3106,7 @@ def test_http_post_rejects_busy_threshold_above_percent_range():
             f"{base}/api/sessions",
             {
                 "npu_ids": [0],
-                "vram": "64MB",
+                "vram": "128MB",
                 "interval": 20,
                 "busy_threshold": 101,
             },
@@ -3134,7 +3134,7 @@ def test_http_post_rejects_invalid_job_id_without_creating_session():
             f"{base}/api/sessions",
             {
                 "npu_ids": [0],
-                "vram": "64MB",
+                "vram": "128MB",
                 "interval": 20,
                 "busy_threshold": 5,
                 "job_id": "",

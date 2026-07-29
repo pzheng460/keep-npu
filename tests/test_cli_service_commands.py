@@ -2441,7 +2441,7 @@ def test_blocking_mode_defaults_to_eco_safe_busy_threshold(monkeypatch):
     )
 
     assert result.exit_code == 0
-    assert called["args"] == (120, "0", "1GiB", None, 25, "aicore")
+    assert called["args"] == (120, "0", "1GiB", None, 25, "mixed")
 
 
 def test_blocking_mode_preserves_explicit_unconditional_busy_threshold(monkeypatch):
@@ -2475,7 +2475,7 @@ def test_blocking_mode_preserves_explicit_unconditional_busy_threshold(monkeypat
     )
 
     assert result.exit_code == 0
-    assert called["args"] == (120, "0", "1GiB", None, -1, "aicore")
+    assert called["args"] == (120, "0", "1GiB", None, -1, "mixed")
 
 
 def test_blocking_mode_rejects_non_positive_interval(monkeypatch):

@@ -1430,7 +1430,10 @@ def main(
     workload: str = typer.Option(
         DEFAULT_WORKLOAD,
         "--workload",
-        help="Keepalive workload: aicore (default, drives nputop UTL) or vector.",
+        help=(
+            "Keepalive workload: mixed (default, drives Cube, Vector, and HBM), "
+            "aicore, or vector."
+        ),
     ),
 ):
     """Run blocking keep-alive mode when no subcommand is provided."""
@@ -1518,7 +1521,10 @@ def start(
     workload: str = typer.Option(
         DEFAULT_WORKLOAD,
         "--workload",
-        help="Keepalive workload: aicore (default, drives nputop UTL) or vector.",
+        help=(
+            "Keepalive workload: mixed (default, drives Cube, Vector, and HBM), "
+            "aicore, or vector."
+        ),
     ),
     job_id: Optional[str] = typer.Option(
         None,
