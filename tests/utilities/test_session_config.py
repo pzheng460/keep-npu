@@ -176,13 +176,17 @@ def test_validate_busy_threshold_rejects_non_plain_integers(value):
 
 
 def test_validate_workload_accepts_public_values():
+    assert session_config.DEFAULT_WORKLOAD == "mixed"
+    assert validate_workload("mixed") == "mixed"
     assert validate_workload("aicore") == "aicore"
     assert validate_workload("vector") == "vector"
 
 
 @pytest.mark.parametrize("value", [None, "", "AICORE", "relu", 1, True, [], {}])
 def test_validate_workload_rejects_noncanonical_values(value):
-    with pytest.raises(ValueError, match="workload must be 'aicore' or 'vector'"):
+    with pytest.raises(
+        ValueError, match="workload must be 'mixed', 'aicore', or 'vector'"
+    ):
         validate_workload(value)
 
 

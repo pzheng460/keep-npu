@@ -6,7 +6,8 @@ from typing import Any, List, Optional, Tuple, Union
 JOB_ID_PATTERN_TEXT = r"^(?!\.{1,2}$)[A-Za-z0-9._~-]+$"
 _JOB_ID_PATTERN = re.compile(JOB_ID_PATTERN_TEXT)
 DEFAULT_BUSY_THRESHOLD = 25
-DEFAULT_WORKLOAD = "aicore"
+DEFAULT_WORKLOAD = "mixed"
+PUBLIC_WORKLOADS = frozenset({"mixed", "aicore", "vector"})
 MAX_NPU_IDS = 64
 PUBLIC_INTERVAL_MAX_SECONDS = int(threading.TIMEOUT_MAX)
 
@@ -120,8 +121,8 @@ def validate_busy_threshold(busy_threshold: Any) -> int:
 
 def validate_workload(value: Any) -> str:
     """Validate and normalize the keepalive workload name."""
-    if not isinstance(value, str) or value not in {"aicore", "vector"}:
-        raise ValueError("workload must be 'aicore' or 'vector'")
+    if not isinstance(value, str) or value not in PUBLIC_WORKLOADS:
+        raise ValueError("workload must be 'mixed', 'aicore', or 'vector'")
     return value
 
 

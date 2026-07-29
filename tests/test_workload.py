@@ -1,8 +1,12 @@
 import pytest
 
 from keep_npu.single_npu_controller.workload import (
+    MAX_MATRIX_DIM,
+    MIN_MIXED_BYTES,
+    MIN_MIXED_VECTOR_BYTES,
     AICorePlan,
     plan_aicore_workload,
+    plan_mixed_workload,
     validate_workload_vram,
 )
 
@@ -44,7 +48,36 @@ def test_aicore_plan_is_aligned_capped_and_inside_budget():
     assert plan.matrix_dim == 8192
     assert plan.matrix_dim % 16 == 0
     assert budget_elements * 4 - 3 <= plan.allocated_bytes <= budget_elements * 4
-    assert (
-        plan.allocated_bytes
-        == 3 * 8192 * 8192 * 2 + plan.filler_elements * 4
-    )
+    assert plan.allocated_bytes == 3 * 8192 * 8192 * 2 + plan.filler_elements * 4
+
+
+def test_minimum_mixed_plan_reserves_aligned_cube_and_vector_memory():
+    plan = plan_mixed_workload(MIN_MIXED_BYTES // 4)
+
+    assert plan.matrix_dim == 16
+    assert plan.vector_elements == MIN_MIXED_VECTOR_BYTES // 4
+    assert plan.allocated_bytes == MIN_MIXED_BYTES
+
+
+def test_mixed_plan_rejects_budget_below_minimum():
+    with pytest.raises(
+        ValueError,
+        match=f"mixed workload requires --vram of at least {MIN_MIXED_BYTES} bytes",
+    ):
+        plan_mixed_workload((MIN_MIXED_BYTES // 4) - 1)
+
+
+def test_default_mixed_plan_caps_cube_and_assigns_remainder_to_vector():
+    budget_elements = 1024**3 // 4
+    plan = plan_mixed_workload(budget_elements)
+    matrix_bytes = 3 * MAX_MATRIX_DIM**2 * 2
+
+    assert plan.matrix_dim == MAX_MATRIX_DIM
+    assert plan.vector_elements == (1024**3 - matrix_bytes) // 4
+    assert plan.allocated_bytes == 1024**3
+
+
+def test_workload_vram_validation_applies_mixed_minimum():
+    assert validate_workload_vram("mixed", MIN_MIXED_BYTES) == MIN_MIXED_BYTES // 4
+    with pytest.raises(ValueError, match="mixed workload requires --vram"):
+        validate_workload_vram("mixed", MIN_MIXED_BYTES - 4)
