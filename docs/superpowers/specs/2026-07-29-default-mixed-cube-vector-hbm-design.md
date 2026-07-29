@@ -77,9 +77,11 @@ The planner follows these rules:
 5. Matrix and Vector tensors are disjoint, so concurrent in-place Vector
    operations cannot race with matrix multiplication.
 
-The default `1GiB` budget leaves enough room for the validated 8192-dimension
-Cube matrices and a large Vector buffer. Larger budgets increase the Vector
-region after the Cube dimension reaches its cap.
+The default `1GiB` budget leaves enough room for 12288-dimension Cube matrices
+and roughly 160 MiB of Vector storage. Remote 910B2 validation selected this
+mixed-only cap because 8192 left Cube utilization below 90% under concurrent
+HBM pressure, while 12288 sustained both engines. Explicit `aicore` mode keeps
+its independently validated 8192 cap.
 
 ## Runtime Architecture
 
@@ -96,6 +98,12 @@ Each feeder synchronizes only its own stream after a bounded group. This keeps
 queues finite, surfaces asynchronous CANN failures close to their source, and
 allows the stop event to be observed between groups. The lifecycle worker
 waits for both feeders during release.
+
+Non-negative busy thresholds retain a one-second mixed batch before telemetry
+is checked again. Unconditional `-1` mode keeps the same feeders alive for
+60-second batches to avoid utilization gaps from rebuilding threads every
+second; the stop event is still polled during the batch and the five-second
+post-stop join bound remains unchanged.
 
 The implementation must not globally synchronize after each individual
 operation because that would serialize the two engines. A global device

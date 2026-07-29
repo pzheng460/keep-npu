@@ -144,3 +144,46 @@ total utilization. Vector execution now synchronizes its asynchronous queue in
 bounded groups, so SIGTERM released the 1 GiB allocation cleanly without the
 previous two-second worker shutdown error. A final post-stop sample showed zero
 AI Core, AI Vector, and total utilization on devices 4–7.
+
+## Default mixed Cube, Vector, and HBM validation — 2026-07-29
+
+The final 1.0.3 wheel (`sha256
+9691959f7102d2f2f296b54710877f994302189533d2cda76aca528ded89affd`) was
+installed into isolated `--system-site-packages` virtual environments. Neither
+shared Ascend Python environment was modified. The tested command omitted
+`--workload`, so it exercised the public default:
+
+```console
+keep-npu --npu-ids 0 --vram 1GiB --interval 60 --busy-threshold -1
+```
+
+On the healthy 910B2 host, the mixed planner used 12288-by-12288 FP16 matrices,
+160 MiB of Vector storage, one queued Cube operation, and 64 queued Vector
+operations. Unconditional mode retained its feeder threads for 60 seconds,
+avoiding the utilization gap caused by rebuilding them every second. Ten
+consecutive post-warm-up samples from the installed wheel were:
+
+| Metric | Ten consecutive readings |
+| --- | --- |
+| AI Core | 99, 99, 99, 99, 99, 99, 99, 99, 99, 99% |
+| AI Vector | 95, 95, 95, 95, 94, 95, 95, 95, 95, 95% |
+| HBM bandwidth | 99, 99, 99, 99, 99, 99, 99, 99, 99, 99% |
+| Total NPU utilization | 100% in every sample |
+
+The same wheel also started successfully on four idle 910B1 devices 4–7.
+Across ten samples per device it sustained 94–95% AI Core, 99–100% HBM
+bandwidth, 100% total utilization, and 84–90% AI Vector. The lower Vector
+counter was specific to the 910B1 host, whose devices reported Warning health;
+the strict simultaneous 90% acceptance was therefore established on the
+healthy 910B2 target.
+
+The first 910B1 deployment exposed a separate startup bug: fresh
+`torch.npu.set_device` context creation took 8.68 seconds while mixed tensor
+allocation took 0.03 seconds, so the previous fixed five-second startup wait
+rejected normal initialization. The bounded startup wait is now 30 seconds.
+
+SIGTERM stopped both final runs cleanly. Post-stop telemetry reported zero AI
+Core, AI Vector, HBM bandwidth, and total utilization on every selected device,
+with HBM usage back at the five-percent baseline. All uniquely named wheel and
+virtual-environment directories were removed from both hosts and the test
+container; no KeepNPU test process remained.

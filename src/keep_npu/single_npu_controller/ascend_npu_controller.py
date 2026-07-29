@@ -35,9 +35,11 @@ logger = setup_logger(__name__)
 MAX_CHUNK_ELEMENTS = 1 << 30
 VECTOR_SYNC_INTERVAL = 32
 MIXED_BATCH_SECONDS = 1.0
+MIXED_UNCONDITIONAL_BATCH_SECONDS = 60.0
 MIXED_FEEDER_JOIN_TIMEOUT = 5.0
-MIXED_CUBE_CHUNK = AICORE_BATCH_ITERATIONS
-MIXED_VECTOR_CHUNK = VECTOR_SYNC_INTERVAL
+MIXED_CUBE_CHUNK = 1
+MIXED_VECTOR_CHUNK = 64
+ASCEND_STARTUP_TIMEOUT_SECONDS = 30.0
 
 
 @dataclass
@@ -91,6 +93,7 @@ class AscendNPUController(BaseNPUController):
         self._thread: Optional[threading.Thread] = None
         self._failure_exc: Optional[Exception] = None
         self._num_elements: Optional[int] = None
+        self._startup_timeout_seconds = ASCEND_STARTUP_TIMEOUT_SECONDS
 
     def keep(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -117,7 +120,7 @@ class AscendNPUController(BaseNPUController):
             self._thread = None
             self._stop_evt = None
             raise
-        startup_timeout = 5.0
+        startup_timeout = self._startup_timeout_seconds
         if not startup_evt.wait(startup_timeout):
             self._stop_evt.set()
             self._thread.join(timeout=1.0)
@@ -324,8 +327,13 @@ class AscendNPUController(BaseNPUController):
             (time.monotonic() - started) * 1000,
         )
 
+    def _mixed_batch_seconds(self) -> float:
+        if self.busy_threshold == -1:
+            return MIXED_UNCONDITIONAL_BATCH_SECONDS
+        return MIXED_BATCH_SECONDS
+
     def _run_mixed_batch(self, allocation: MixedAllocation) -> None:
-        deadline = time.monotonic() + MIXED_BATCH_SECONDS
+        deadline = time.monotonic() + self._mixed_batch_seconds()
         cancel = threading.Event()
         failures: list[tuple[str, Exception]] = []
         failure_lock = threading.Lock()
@@ -388,6 +396,9 @@ class AscendNPUController(BaseNPUController):
         ]
         for feeder in feeders:
             feeder.start()
+        while not should_stop() and any(feeder.is_alive() for feeder in feeders):
+            remaining = max(0.0, deadline - time.monotonic())
+            cancel.wait(timeout=min(0.05, remaining))
         for feeder in feeders:
             feeder.join(timeout=MIXED_FEEDER_JOIN_TIMEOUT)
         stuck = [feeder.name for feeder in feeders if feeder.is_alive()]

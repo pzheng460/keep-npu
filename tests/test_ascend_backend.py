@@ -170,6 +170,54 @@ def test_controller_defaults_to_mixed_workload(monkeypatch):
     assert controller.workload == "mixed"
 
 
+def test_mixed_hardware_tuning_uses_fair_cube_and_deep_vector_queues():
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    assert module.MIXED_CUBE_CHUNK == 1
+    assert module.MIXED_VECTOR_CHUNK == 64
+    assert module.MIXED_UNCONDITIONAL_BATCH_SECONDS >= 60.0
+
+
+def test_mixed_batch_duration_is_long_lived_only_in_unconditional_mode(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+
+    polite = module.AscendNPUController(rank=0, vram_to_keep="1GiB", busy_threshold=25)
+    unconditional = module.AscendNPUController(
+        rank=0, vram_to_keep="1GiB", busy_threshold=-1
+    )
+
+    assert polite._mixed_batch_seconds() == module.MIXED_BATCH_SECONDS
+    assert (
+        unconditional._mixed_batch_seconds() == module.MIXED_UNCONDITIONAL_BATCH_SECONDS
+    )
+
+
+def test_mixed_batch_waits_for_its_deadline_before_applying_join_timeout(
+    monkeypatch,
+):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    monkeypatch.setattr(module, "MIXED_BATCH_SECONDS", 0.05)
+    monkeypatch.setattr(module, "MIXED_FEEDER_JOIN_TIMEOUT", 0.01)
+    monkeypatch.setattr(module, "MIXED_CUBE_CHUNK", 1)
+    monkeypatch.setattr(module, "MIXED_VECTOR_CHUNK", 1)
+    fake.on_matmul = lambda _calls: time.sleep(0.002)
+    fake.on_relu = lambda _calls: time.sleep(0.002)
+    controller = module.AscendNPUController(
+        rank=0, vram_to_keep="1GiB", busy_threshold=25
+    )
+    controller._stop_evt = threading.Event()
+
+    controller._run_mixed_batch(controller._allocate_mixed(controller.vram_to_keep))
+
+
 def test_controller_unknown_utilization_defers_allocation(monkeypatch):
     from keep_npu.single_npu_controller import ascend_npu_controller as module
 
@@ -478,6 +526,40 @@ def test_controller_surfaces_startup_device_failure(monkeypatch):
 
     assert controller._thread is None
     assert controller._stop_evt is None
+
+
+def test_controller_default_startup_timeout_covers_slow_context_initialization(
+    monkeypatch,
+):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+
+    controller = module.AscendNPUController(
+        rank=0, vram_to_keep=1536, busy_threshold=-1, workload="aicore"
+    )
+
+    assert controller._startup_timeout_seconds >= 30.0
+
+
+def test_controller_honors_configurable_startup_timeout(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    fake.npu.set_device = lambda rank: time.sleep(0.05)
+    controller = module.AscendNPUController(
+        rank=0, vram_to_keep=1536, busy_threshold=-1, workload="aicore"
+    )
+    controller._startup_timeout_seconds = 0.01
+
+    with pytest.raises(RuntimeError, match="startup within 0.0s"):
+        controller.keep()
+
+    controller.release()
 
 
 def test_controller_rejects_retry_while_worker_is_stopping(monkeypatch):

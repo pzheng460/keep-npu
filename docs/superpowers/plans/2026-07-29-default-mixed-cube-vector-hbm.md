@@ -13,7 +13,7 @@
 - Public workload values are exactly `mixed`, `aicore`, and `vector`.
 - `DEFAULT_WORKLOAD` is exactly `mixed`; users do not need `--workload` for the mixed mode.
 - `--vram` remains one total per-NPU byte budget shared by Cube matrices and Vector buffers.
-- The default `1GiB` plan retains 8192-by-8192 FP16 matrices and assigns the remaining budget to Vector buffers.
+- The default `1GiB` plan uses 12288-by-12288 FP16 matrices and assigns the remaining roughly 160 MiB to Vector buffers; explicit `aicore` retains its 8192 cap.
 - Mixed mode reserves at least 64 MiB for Vector/HBM work and at least the existing 1536-byte aligned Cube allocation.
 - `--busy-threshold -1` skips telemetry gating and inter-batch sleep; non-negative thresholds gate the whole mixed batch.
 - Feeder queues are bounded and synchronize their own streams; per-operation global synchronization is forbidden.
@@ -338,9 +338,10 @@ Add:
 
 ```python
 MIXED_BATCH_SECONDS = 1.0
+MIXED_UNCONDITIONAL_BATCH_SECONDS = 60.0
 MIXED_FEEDER_JOIN_TIMEOUT = 5.0
-MIXED_CUBE_CHUNK = AICORE_BATCH_ITERATIONS
-MIXED_VECTOR_CHUNK = VECTOR_SYNC_INTERVAL
+MIXED_CUBE_CHUNK = 1
+MIXED_VECTOR_CHUNK = 64
 
 
 @dataclass
@@ -972,7 +973,8 @@ Allowed tuning variables are:
 
 - `MIXED_CUBE_CHUNK`;
 - `MIXED_VECTOR_CHUNK`; and
-- `MIXED_BATCH_SECONDS`.
+- `MIXED_BATCH_SECONDS`; and
+- the mixed-only matrix cap.
 
 For each attempted change:
 
@@ -983,8 +985,9 @@ For each attempted change:
 5. rebuild the wheel; and
 6. repeat the ten-sample hardware measurement.
 
-Do not change matrix shape, Vector operator, stream count, public CLI, or HBM
-budget in the same tuning attempt.
+Do not change the Vector operator, stream count, public CLI, or HBM budget in
+the same tuning attempt. Matrix shape may be tuned independently while
+preserving the explicit `aicore` cap and the mixed Vector minimum.
 
 - [ ] **Step 6: Verify bounded cleanup**
 

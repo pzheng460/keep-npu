@@ -11,6 +11,7 @@ FP16_BYTES = 2
 MATRIX_COUNT = 3
 MATRIX_ALIGNMENT = 16
 MAX_MATRIX_DIM = 8192
+MAX_MIXED_MATRIX_DIM = 12288
 AICORE_BATCH_ITERATIONS = 32
 MIN_AICORE_BYTES = MATRIX_COUNT * MATRIX_ALIGNMENT**2 * FP16_BYTES
 MIN_MIXED_VECTOR_BYTES = 64 * 1024**2
@@ -60,7 +61,7 @@ def plan_mixed_workload(float32_elements: int) -> MixedPlan:
         )
     cube_budget = budget_bytes - MIN_MIXED_VECTOR_BYTES
     raw_dim = isqrt(cube_budget // (MATRIX_COUNT * FP16_BYTES))
-    matrix_dim = min(MAX_MATRIX_DIM, raw_dim)
+    matrix_dim = min(MAX_MIXED_MATRIX_DIM, raw_dim)
     matrix_dim -= matrix_dim % MATRIX_ALIGNMENT
     matrix_bytes = MATRIX_COUNT * matrix_dim**2 * FP16_BYTES
     vector_elements = (budget_bytes - matrix_bytes) // 4
