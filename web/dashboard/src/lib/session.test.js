@@ -15,6 +15,7 @@ import {
   parseBusyThreshold,
   parseNpuIds,
   parsePositiveNumber,
+  parseWorkload,
   summarizeDashboardStats
 } from "./session"
 
@@ -82,6 +83,12 @@ describe("numeric parsing", () => {
 })
 
 describe("buildSessionPayload", () => {
+  it("accepts the three public workload modes", () => {
+    expect(parseWorkload("mixed")).toBe("mixed")
+    expect(parseWorkload("aicore")).toBe("aicore")
+    expect(parseWorkload("vector")).toBe("vector")
+  })
+
   it("builds a normalized payload", () => {
     expect(
       buildSessionPayload({
@@ -124,7 +131,7 @@ describe("buildSessionPayload", () => {
         busyThreshold: "25",
         workload: "relu"
       })
-    ).toThrow("Workload must be aicore or vector")
+    ).toThrow("Workload must be mixed, aicore, or vector")
   })
 })
 

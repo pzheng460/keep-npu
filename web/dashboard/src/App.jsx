@@ -30,7 +30,7 @@ const defaultForm = {
   vram: "1GiB",
   interval: "300",
   busyThreshold: "25",
-  workload: "aicore"
+  workload: "mixed"
 }
 
 function formatBytes(value) {
@@ -352,8 +352,9 @@ export default function App() {
                     }))
                   }
                 >
-                  <option value="aicore">AI Core (default)</option>
-                  <option value="vector">Vector (lightweight)</option>
+                  <option value="mixed">Mixed Cube + Vector + HBM (default)</option>
+                  <option value="aicore">AI Core / Cube only</option>
+                  <option value="vector">Vector + HBM only</option>
                 </select>
               </label>
 

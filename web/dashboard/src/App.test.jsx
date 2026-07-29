@@ -13,6 +13,23 @@ describe("REQUEST_TIMEOUT_MS", () => {
 })
 
 describe("App", () => {
+  it("selects mixed Cube, Vector, and HBM as the default workload", () => {
+    const previousWindow = globalThis.window
+    globalThis.window = { location: { origin: "http://127.0.0.1:8765" } }
+
+    try {
+      const markup = renderToStaticMarkup(<App />)
+
+      expect(markup).toContain(
+        '<option value="mixed" selected="">Mixed Cube + Vector + HBM (default)</option>'
+      )
+      expect(markup).toContain('<option value="aicore">AI Core / Cube only</option>')
+      expect(markup).toContain('<option value="vector">Vector + HBM only</option>')
+    } finally {
+      globalThis.window = previousWindow
+    }
+  })
+
   it("renders an interval input that allows fractional seconds", () => {
     const previousWindow = globalThis.window
     globalThis.window = { location: { origin: "http://127.0.0.1:8765" } }

@@ -83,8 +83,8 @@ export function parseBusyThreshold(value) {
 }
 
 export function parseWorkload(value) {
-  if (value !== "aicore" && value !== "vector") {
-    throw new Error("Workload must be aicore or vector")
+  if (value !== "mixed" && value !== "aicore" && value !== "vector") {
+    throw new Error("Workload must be mixed, aicore, or vector")
   }
   return value
 }
