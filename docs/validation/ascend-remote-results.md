@@ -147,11 +147,12 @@ AI Core, AI Vector, and total utilization on devices 4–7.
 
 ## Default mixed Cube, Vector, and HBM validation — 2026-07-29
 
-The final 1.0.3 wheel (`sha256
-9691959f7102d2f2f296b54710877f994302189533d2cda76aca528ded89affd`) was
-installed into isolated `--system-site-packages` virtual environments. Neither
-shared Ascend Python environment was modified. The tested command omitted
-`--workload`, so it exercised the public default:
+The release-candidate source for 1.0.4 was built before the version bump as a
+local 1.0.3 wheel (`sha256
+9691959f7102d2f296b54710877f994302189533d2cda76aca528ded89affd`). That wheel
+was installed into isolated `--system-site-packages` virtual environments.
+Neither shared Ascend Python environment was modified. The tested command
+omitted `--workload`, so it exercised the public default:
 
 ```console
 keep-npu --npu-ids 0 --vram 1GiB --interval 60 --busy-threshold -1
