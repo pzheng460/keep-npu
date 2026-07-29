@@ -23,6 +23,14 @@ from keep_npu.utilities.session_config import (
 logger = setup_logger(__name__)
 
 
+def _ranked_error(rank: int, exc: Exception) -> str:
+    message = str(exc)
+    prefix = f"rank {rank}:"
+    if message.startswith(prefix):
+        return message
+    return f"{prefix} {message}"
+
+
 class ControllerStartupUnavailable(Exception):
     """Expected Ascend hardware/runtime unavailability during startup."""
 
@@ -93,7 +101,7 @@ class GlobalNPUController:
                         rollback_errors.append((candidate.rank, release_exc))
                 if rollback_errors:
                     detail = "; ".join(
-                        f"rank {rank}: {exc}" for rank, exc in rollback_errors
+                        _ranked_error(rank, exc) for rank, exc in rollback_errors
                     )
                     logger.error("NPU startup rollback release failures: %s", detail)
                 raise
@@ -105,7 +113,7 @@ class GlobalNPUController:
 
         def release_one(controller) -> None:
             try:
-                controller.release()
+                controller.release(clear_cache=False)
             except Exception as exc:
                 with lock:
                     errors.append((controller.rank, exc))
@@ -118,8 +126,13 @@ class GlobalNPUController:
             thread.start()
         for thread in threads:
             thread.join()
+        if self.controllers:
+            try:
+                self.controllers[0].clear_cache()
+            except Exception as exc:
+                errors.append((self.controllers[0].rank, exc))
         if errors:
-            detail = "; ".join(f"rank {rank}: {exc}" for rank, exc in errors)
+            detail = "; ".join(_ranked_error(rank, exc) for rank, exc in errors)
             raise RuntimeError(f"Failed to release NPU controllers: {detail}")
 
     def runtime_error(self) -> Optional[Exception]:

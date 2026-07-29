@@ -34,10 +34,11 @@ from keep_npu.utilities.session_config import (
 logger = setup_logger(__name__)
 MAX_CHUNK_ELEMENTS = 1 << 30
 VECTOR_SYNC_INTERVAL = 32
+MAX_MIXED_ACTIVE_VECTOR_BYTES = 160 * 1024**2
 MIXED_BATCH_SECONDS = 1.0
 MIXED_UNCONDITIONAL_BATCH_SECONDS = 60.0
 MIXED_FEEDER_JOIN_TIMEOUT = 5.0
-MIXED_CUBE_CHUNK = 1
+MIXED_CUBE_CHUNK = 4
 MIXED_VECTOR_CHUNK = 64
 ASCEND_STARTUP_TIMEOUT_SECONDS = 30.0
 
@@ -61,6 +62,7 @@ class MixedAllocation:
     right: Any
     output: Any
     vectors: List[Any]
+    reserve_vectors: List[Any]
     plan: MixedPlan
     cube_stream: Any
     vector_stream: Any
@@ -134,11 +136,16 @@ class AscendNPUController(BaseNPUController):
             self._stop_evt = None
             raise startup_errors[0]
 
-    def release(self) -> None:
+    def clear_cache(self) -> None:
+        """Release process-wide unused Ascend allocator blocks."""
+        self._torch.npu.empty_cache()
+
+    def release(self, *, clear_cache: bool = True) -> None:
         thread = self._thread
         if not (thread and thread.is_alive()):
             if thread is not None:
-                self._torch.npu.empty_cache()
+                if clear_cache:
+                    self.clear_cache()
                 self._thread = None
                 self._stop_evt = None
             return
@@ -146,13 +153,17 @@ class AscendNPUController(BaseNPUController):
         if stop_evt is None:
             raise RuntimeError(f"rank {self.rank}: stop event missing")
         stop_evt.set()
-        join_timeout = max(2.0, min(float(self.interval) + 2.0, 30.0))
+        join_timeout = max(
+            MIXED_FEEDER_JOIN_TIMEOUT + 1.0,
+            min(float(self.interval) + 2.0, 30.0),
+        )
         thread.join(timeout=join_timeout)
         if thread.is_alive():
             raise TimeoutError(
                 f"rank {self.rank}: keep thread did not stop within {join_timeout:.1f}s"
             )
-        self._torch.npu.empty_cache()
+        if clear_cache:
+            self.clear_cache()
         self._thread = None
         self._stop_evt = None
 
@@ -163,6 +174,22 @@ class AscendNPUController(BaseNPUController):
             chunk_size = min(remaining, MAX_CHUNK_ELEMENTS)
             chunks.append(
                 self._torch.rand(
+                    chunk_size,
+                    device=self.device,
+                    dtype=self._torch.float32,
+                    requires_grad=False,
+                )
+            )
+            remaining -= chunk_size
+        return chunks
+
+    def _allocate_reserve(self, num_elements: int) -> List[Any]:
+        chunks = []
+        remaining = num_elements
+        while remaining:
+            chunk_size = min(remaining, MAX_CHUNK_ELEMENTS)
+            chunks.append(
+                self._torch.empty(
                     chunk_size,
                     device=self.device,
                     dtype=self._torch.float32,
@@ -197,17 +224,22 @@ class AscendNPUController(BaseNPUController):
         left = self._torch.rand(shape, **common)
         right = self._torch.rand(shape, **common)
         output = self._torch.empty(shape, **common)
-        vectors = self._allocate_vector(plan.vector_elements)
+        max_active_elements = MAX_MIXED_ACTIVE_VECTOR_BYTES // 4
+        active_vector_elements = min(plan.vector_elements, max_active_elements)
+        reserve_vector_elements = plan.vector_elements - active_vector_elements
+        vectors = self._allocate_vector(active_vector_elements)
+        reserve_vectors = self._allocate_reserve(reserve_vector_elements)
         cube_stream = self._torch.npu.Stream(device=self.device)
         vector_stream = self._torch.npu.Stream(device=self.device)
         return MixedAllocation(
-            left,
-            right,
-            output,
-            vectors,
-            plan,
-            cube_stream,
-            vector_stream,
+            left=left,
+            right=right,
+            output=output,
+            vectors=vectors,
+            reserve_vectors=reserve_vectors,
+            plan=plan,
+            cube_stream=cube_stream,
+            vector_stream=vector_stream,
         )
 
     def _allocate_workload(self, num_elements: int) -> Any:
@@ -399,8 +431,9 @@ class AscendNPUController(BaseNPUController):
         while not should_stop() and any(feeder.is_alive() for feeder in feeders):
             remaining = max(0.0, deadline - time.monotonic())
             cancel.wait(timeout=min(0.05, remaining))
+        join_deadline = time.monotonic() + MIXED_FEEDER_JOIN_TIMEOUT
         for feeder in feeders:
-            feeder.join(timeout=MIXED_FEEDER_JOIN_TIMEOUT)
+            feeder.join(timeout=max(0.0, join_deadline - time.monotonic()))
         stuck = [feeder.name for feeder in feeders if feeder.is_alive()]
         if stuck:
             cancel.set()

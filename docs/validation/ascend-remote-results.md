@@ -188,3 +188,32 @@ Core, AI Vector, HBM bandwidth, and total utilization on every selected device,
 with HBM usage back at the five-percent baseline. All uniquely named wheel and
 virtual-environment directories were removed from both hosts and the test
 container; no KeepNPU test process remained.
+
+## Large mixed allocation and release regression — 2026-07-29
+
+The large-memory regression used the public default workload and the exact
+reported command shape:
+
+```console
+keep-npu --npu-ids 0,1,4,5,6,7 --vram 56GiB \
+  --interval 0.001 --busy-threshold -1
+```
+
+Mixed allocations now distinguish a bounded 160 MiB active Vector working set
+from empty reserve tensors. The reserve still occupies the full requested HBM
+budget, but is not traversed by every Vector queue iteration. On a healthy
+910B2 device, ten consecutive `npu-smi info -t usages` samples reported
+99–100% AI Core, 96% AI Vector, 100% HBM bandwidth, and 100% total NPU
+utilization while HBM usage remained at 92%.
+
+The six-device 910B1 run associated the KeepNPU PID only with devices
+0, 1, 4, 5, 6, and 7, at roughly 57.5 GiB per device. Devices 2 and 3 retained
+only their pre-existing VLLM processes. Three consecutive rounds reported
+94–96% AI Core, 87–90% AI Vector, 99–100% HBM bandwidth, and 100% total NPU
+utilization on every selected device. All six 910B1 devices reported
+`Health=Warning`; the same workload reached the higher counters above on the
+healthy 910B2 device.
+
+Release supervision now gives the mixed feeders a consistent bounded shutdown
+window. Multi-device release stops all workers in parallel and performs one
+process-wide allocator cache flush instead of six redundant concurrent flushes.

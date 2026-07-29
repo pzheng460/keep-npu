@@ -10,6 +10,8 @@ class FakeController:
         self.workload = workload
         self.keep_calls = 0
         self.release_calls = 0
+        self.release_clear_cache = []
+        self.clear_cache_calls = 0
         self._thread = None
         self._stop_evt = None
         self.instances.append(self)
@@ -20,8 +22,12 @@ class FakeController:
         if self.rank == self.fail_rank:
             raise RuntimeError(f"rank {self.rank} failed")
 
-    def release(self):
+    def release(self, *, clear_cache=True):
         self.release_calls += 1
+        self.release_clear_cache.append(clear_cache)
+
+    def clear_cache(self):
+        self.clear_cache_calls += 1
 
     def allocation_status(self):
         return None
@@ -75,6 +81,25 @@ def test_global_controller_passes_workload_to_each_device(monkeypatch):
     assert [item.workload for item in controller.controllers] == ["vector", "vector"]
 
 
+def test_global_release_stops_all_workers_before_one_process_cache_flush(monkeypatch):
+    from keep_npu.global_npu_controller import global_npu_controller as module
+
+    FakeController.instances = []
+    FakeController.fail_rank = None
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 3)
+    monkeypatch.setattr(module, "AscendNPUController", FakeController)
+    controller = module.GlobalNPUController(npu_ids=[0, 1, 2])
+
+    controller.release()
+
+    assert [item.release_clear_cache for item in controller.controllers] == [
+        [False],
+        [False],
+        [False],
+    ]
+    assert sum(item.clear_cache_calls for item in controller.controllers) == 1
+
+
 def test_global_rolls_back_partial_start(monkeypatch):
     from keep_npu.global_npu_controller import global_npu_controller as module
 
@@ -97,8 +122,8 @@ def test_global_rollback_attempts_every_release_when_one_release_fails(monkeypat
     class ReleaseFailureController(FakeController):
         fail_rank = 2
 
-        def release(self):
-            super().release()
+        def release(self, *, clear_cache=True):
+            super().release(clear_cache=clear_cache)
             if self.rank == 1:
                 raise RuntimeError("rank 1 release failed")
 
@@ -115,3 +140,21 @@ def test_global_rollback_attempts_every_release_when_one_release_fails(monkeypat
         1,
         1,
     ]
+
+
+def test_global_release_does_not_duplicate_rank_in_nested_controller_error(monkeypatch):
+    from keep_npu.global_npu_controller import global_npu_controller as module
+
+    class ReleaseTimeoutController(FakeController):
+        def release(self, *, clear_cache=True):
+            raise TimeoutError("rank 0: keep thread did not stop within 6.0s")
+
+    ReleaseTimeoutController.instances = []
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    monkeypatch.setattr(module, "AscendNPUController", ReleaseTimeoutController)
+    controller = module.GlobalNPUController(npu_ids=[0])
+
+    with pytest.raises(RuntimeError) as exc_info:
+        controller.release()
+
+    assert str(exc_info.value).count("rank 0:") == 1

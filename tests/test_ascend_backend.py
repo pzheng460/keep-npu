@@ -92,14 +92,16 @@ class FakeTorch:
         return value
 
     def rand(self, *shape, **kwargs):
-        tensor = {"shape": shape, **kwargs}
+        tensor = {"shape": shape, "factory": "rand", **kwargs}
         if len(shape) == 1 and isinstance(shape[0], int):
             tensor["elements"] = shape[0]
         self.allocations.append(tensor)
         return tensor
 
     def empty(self, *shape, **kwargs):
-        tensor = {"shape": shape, **kwargs}
+        tensor = {"shape": shape, "factory": "empty", **kwargs}
+        if len(shape) == 1 and isinstance(shape[0], int):
+            tensor["elements"] = shape[0]
         self.allocations.append(tensor)
         return tensor
 
@@ -170,10 +172,10 @@ def test_controller_defaults_to_mixed_workload(monkeypatch):
     assert controller.workload == "mixed"
 
 
-def test_mixed_hardware_tuning_uses_fair_cube_and_deep_vector_queues():
+def test_mixed_hardware_tuning_keeps_both_engines_continuously_queued():
     from keep_npu.single_npu_controller import ascend_npu_controller as module
 
-    assert module.MIXED_CUBE_CHUNK == 1
+    assert module.MIXED_CUBE_CHUNK > 1
     assert module.MIXED_VECTOR_CHUNK == 64
     assert module.MIXED_UNCONDITIONAL_BATCH_SECONDS >= 60.0
 
@@ -327,6 +329,25 @@ def test_mixed_allocation_uses_one_budget_and_two_streams(monkeypatch):
     assert sum(item["elements"] for item in allocation.vectors) == (
         allocation.plan.vector_elements
     )
+
+
+def test_large_mixed_allocation_keeps_reserve_out_of_the_vector_hot_path(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    controller = module.AscendNPUController(rank=0, vram_to_keep="56GiB")
+
+    allocation = controller._allocate_mixed(controller.vram_to_keep)
+
+    active_elements = sum(item["elements"] for item in allocation.vectors)
+    reserve_elements = sum(item["elements"] for item in allocation.reserve_vectors)
+    assert active_elements * 4 == module.MAX_MIXED_ACTIVE_VECTOR_BYTES
+    assert active_elements + reserve_elements == allocation.plan.vector_elements
+    assert allocation.reserve_vectors
+    assert {item["factory"] for item in allocation.vectors} == {"rand"}
+    assert {item["factory"] for item in allocation.reserve_vectors} == {"empty"}
 
 
 def test_mixed_batch_routes_operations_to_distinct_streams(monkeypatch):
@@ -582,3 +603,35 @@ def test_controller_rejects_retry_while_worker_is_stopping(monkeypatch):
 
     with pytest.raises(RuntimeError, match="startup did not complete"):
         controller.keep()
+
+
+def test_release_timeout_covers_the_mixed_feeder_shutdown_budget(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    controller = module.AscendNPUController(
+        rank=0,
+        interval=0.001,
+        vram_to_keep="1GiB",
+    )
+
+    class RecordingAliveThread:
+        def __init__(self):
+            self.join_timeout = None
+
+        def is_alive(self):
+            return True
+
+        def join(self, timeout=None):
+            self.join_timeout = timeout
+
+    thread = RecordingAliveThread()
+    controller._thread = thread
+    controller._stop_evt = threading.Event()
+
+    with pytest.raises(TimeoutError, match="keep thread did not stop"):
+        controller.release()
+
+    assert thread.join_timeout >= module.MIXED_FEEDER_JOIN_TIMEOUT + 1.0
