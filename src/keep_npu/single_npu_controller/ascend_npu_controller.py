@@ -11,7 +11,9 @@ from keep_npu.single_npu_controller.base_npu_controller import BaseNPUController
 from keep_npu.single_npu_controller.workload import (
     AICORE_BATCH_ITERATIONS,
     AICorePlan,
+    MixedPlan,
     plan_aicore_workload,
+    plan_mixed_workload,
 )
 from keep_npu.utilities.logger import setup_logger
 from keep_npu.utilities.npu_monitor import get_npu_utilization
@@ -32,6 +34,10 @@ from keep_npu.utilities.session_config import (
 logger = setup_logger(__name__)
 MAX_CHUNK_ELEMENTS = 1 << 30
 VECTOR_SYNC_INTERVAL = 32
+MIXED_BATCH_SECONDS = 1.0
+MIXED_FEEDER_JOIN_TIMEOUT = 5.0
+MIXED_CUBE_CHUNK = AICORE_BATCH_ITERATIONS
+MIXED_VECTOR_CHUNK = VECTOR_SYNC_INTERVAL
 
 
 @dataclass
@@ -43,6 +49,19 @@ class AICoreAllocation:
     output: Any
     fillers: List[Any]
     plan: AICorePlan
+
+
+@dataclass
+class MixedAllocation:
+    """Disjoint tensors and streams for concurrent Cube and Vector pressure."""
+
+    left: Any
+    right: Any
+    output: Any
+    vectors: List[Any]
+    plan: MixedPlan
+    cube_stream: Any
+    vector_stream: Any
 
 
 class AscendNPUController(BaseNPUController):
@@ -60,7 +79,9 @@ class AscendNPUController(BaseNPUController):
         super().__init__(vram_to_keep=vram_to_keep, interval=interval)
         self.busy_threshold = validate_busy_threshold(busy_threshold)
         self.workload = validate_workload(workload)
-        if self.workload == "aicore":
+        if self.workload == "mixed":
+            plan_mixed_workload(self.vram_to_keep)
+        elif self.workload == "aicore":
             plan_aicore_workload(self.vram_to_keep)
         self.iterations = validate_positive_integer(iterations, "iterations")
         self.rank = validate_visible_rank(rank, visible_torch_device_count())
@@ -162,7 +183,33 @@ class AscendNPUController(BaseNPUController):
         fillers = self._allocate_vector(plan.filler_elements)
         return AICoreAllocation(left, right, output, fillers, plan)
 
+    def _allocate_mixed(self, num_elements: int) -> MixedAllocation:
+        plan = plan_mixed_workload(num_elements)
+        shape = (plan.matrix_dim, plan.matrix_dim)
+        common = {
+            "device": self.device,
+            "dtype": self._torch.float16,
+            "requires_grad": False,
+        }
+        left = self._torch.rand(shape, **common)
+        right = self._torch.rand(shape, **common)
+        output = self._torch.empty(shape, **common)
+        vectors = self._allocate_vector(plan.vector_elements)
+        cube_stream = self._torch.npu.Stream(device=self.device)
+        vector_stream = self._torch.npu.Stream(device=self.device)
+        return MixedAllocation(
+            left,
+            right,
+            output,
+            vectors,
+            plan,
+            cube_stream,
+            vector_stream,
+        )
+
     def _allocate_workload(self, num_elements: int) -> Any:
+        if self.workload == "mixed":
+            return self._allocate_mixed(num_elements)
         if self.workload == "aicore":
             return self._allocate_aicore(num_elements)
         return self._allocate_vector(num_elements)
@@ -277,7 +324,84 @@ class AscendNPUController(BaseNPUController):
             (time.monotonic() - started) * 1000,
         )
 
+    def _run_mixed_batch(self, allocation: MixedAllocation) -> None:
+        deadline = time.monotonic() + MIXED_BATCH_SECONDS
+        cancel = threading.Event()
+        failures: list[tuple[str, Exception]] = []
+        failure_lock = threading.Lock()
+
+        def should_stop() -> bool:
+            return (
+                cancel.is_set()
+                or (self._stop_evt is not None and self._stop_evt.is_set())
+                or time.monotonic() >= deadline
+            )
+
+        def record_failure(engine: str, exc: Exception) -> None:
+            with failure_lock:
+                if not failures:
+                    failures.append((engine, exc))
+            cancel.set()
+
+        def cube_feeder() -> None:
+            try:
+                self._torch.npu.set_device(self.rank)
+                with self._torch.npu.stream(allocation.cube_stream):
+                    while not should_stop():
+                        for _ in range(MIXED_CUBE_CHUNK):
+                            self._torch.matmul(
+                                allocation.left,
+                                allocation.right,
+                                out=allocation.output,
+                            )
+                            if should_stop():
+                                break
+                        allocation.cube_stream.synchronize()
+            except Exception as exc:
+                record_failure("cube", exc)
+
+        def vector_feeder() -> None:
+            try:
+                self._torch.npu.set_device(self.rank)
+                with self._torch.npu.stream(allocation.vector_stream):
+                    while not should_stop():
+                        for _ in range(MIXED_VECTOR_CHUNK):
+                            for tensor in allocation.vectors:
+                                self._torch.relu_(tensor)
+                            if should_stop():
+                                break
+                        allocation.vector_stream.synchronize()
+            except Exception as exc:
+                record_failure("vector", exc)
+
+        feeders = [
+            threading.Thread(
+                target=cube_feeder,
+                name=f"npu-cube-{self.rank}",
+                daemon=True,
+            ),
+            threading.Thread(
+                target=vector_feeder,
+                name=f"npu-vector-{self.rank}",
+                daemon=True,
+            ),
+        ]
+        for feeder in feeders:
+            feeder.start()
+        for feeder in feeders:
+            feeder.join(timeout=MIXED_FEEDER_JOIN_TIMEOUT)
+        stuck = [feeder.name for feeder in feeders if feeder.is_alive()]
+        if stuck:
+            cancel.set()
+            raise TimeoutError(f"mixed feeder threads did not stop: {', '.join(stuck)}")
+        if failures:
+            engine, exc = failures[0]
+            raise RuntimeError(f"{engine} feeder failed: {exc}") from exc
+
     def _run_batch(self, allocation: Any) -> None:
+        if self.workload == "mixed":
+            self._run_mixed_batch(allocation)
+            return
         if self.workload == "aicore":
             self._run_aicore_batch(allocation)
         else:

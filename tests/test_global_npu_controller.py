@@ -59,7 +59,7 @@ def test_global_rejects_small_aicore_budget_before_hardware_enumeration(monkeypa
     )
 
     with pytest.raises(ValueError, match="at least 1536 bytes"):
-        module.GlobalNPUController(npu_ids=[0], vram_to_keep=4)
+        module.GlobalNPUController(npu_ids=[0], vram_to_keep=4, workload="aicore")
 
 
 def test_global_controller_passes_workload_to_each_device(monkeypatch):

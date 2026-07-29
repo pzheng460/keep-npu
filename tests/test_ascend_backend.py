@@ -1,14 +1,41 @@
 import threading
+import time
 
 import pytest
 
 
+class FakeStream:
+    def __init__(self, fake, device=None):
+        self.fake = fake
+        self.device = device
+        self.sync_calls = 0
+
+    def synchronize(self):
+        self.sync_calls += 1
+
+
+class FakeStreamContext:
+    def __init__(self, fake, stream):
+        self.fake = fake
+        self.stream = stream
+        self.previous = None
+
+    def __enter__(self):
+        self.previous = getattr(self.fake.stream_state, "active", None)
+        self.fake.stream_state.active = self.stream
+
+    def __exit__(self, exc_type, exc, tb):
+        self.fake.stream_state.active = self.previous
+
+
 class FakeNPU:
-    def __init__(self, count=2):
+    def __init__(self, count=2, fake=None):
         self.count = count
+        self.fake = fake
         self.current = 0
         self.empty_cache_calls = 0
         self.sync_calls = 0
+        self.streams = []
 
     def is_available(self):
         return self.count > 0
@@ -30,6 +57,14 @@ class FakeNPU:
     def synchronize(self):
         self.sync_calls += 1
 
+    def Stream(self, device=None):
+        stream = FakeStream(self.fake, device)
+        self.streams.append(stream)
+        return stream
+
+    def stream(self, stream):
+        return FakeStreamContext(self.fake, stream)
+
     def mem_get_info(self, rank=None):
         return 6 * 1024**3, 8 * 1024**3
 
@@ -42,11 +77,16 @@ class FakeTorch:
     float32 = "float32"
 
     def __init__(self, count=2):
-        self.npu = FakeNPU(count)
+        self.npu = FakeNPU(count, self)
         self.allocations = []
         self.matmul_calls = 0
         self.relu_calls = 0
         self.on_matmul = None
+        self.on_relu = None
+        self.stream_state = threading.local()
+        self.operation_lock = threading.Lock()
+        self.matmul_streams = []
+        self.relu_streams = []
 
     def device(self, value):
         return value
@@ -64,13 +104,21 @@ class FakeTorch:
         return tensor
 
     def matmul(self, left, right, *, out):
-        self.matmul_calls += 1
+        with self.operation_lock:
+            self.matmul_calls += 1
+            calls = self.matmul_calls
+            self.matmul_streams.append(getattr(self.stream_state, "active", None))
         if self.on_matmul is not None:
-            self.on_matmul(self.matmul_calls)
+            self.on_matmul(calls)
         return out
 
     def relu_(self, tensor):
-        self.relu_calls += 1
+        with self.operation_lock:
+            self.relu_calls += 1
+            calls = self.relu_calls
+            self.relu_streams.append(getattr(self.stream_state, "active", None))
+        if self.on_relu is not None:
+            self.on_relu(calls)
         return tensor
 
 
@@ -110,16 +158,16 @@ def test_controller_rejects_invalid_rank_before_backend_probe(monkeypatch):
         module.AscendNPUController(rank="0", vram_to_keep=4)
 
 
-def test_controller_defaults_to_aicore_workload(monkeypatch):
+def test_controller_defaults_to_mixed_workload(monkeypatch):
     from keep_npu.single_npu_controller import ascend_npu_controller as module
 
     fake = FakeTorch(count=1)
     monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
     monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
 
-    controller = module.AscendNPUController(rank=0, vram_to_keep=1536)
+    controller = module.AscendNPUController(rank=0, vram_to_keep="1GiB")
 
-    assert controller.workload == "aicore"
+    assert controller.workload == "mixed"
 
 
 def test_controller_unknown_utilization_defers_allocation(monkeypatch):
@@ -135,6 +183,7 @@ def test_controller_unknown_utilization_defers_allocation(monkeypatch):
         iterations=1,
         vram_to_keep=1536,
         busy_threshold=25,
+        workload="aicore",
     )
 
     controller.keep()
@@ -179,7 +228,7 @@ def test_controller_unconditional_mode_allocates_runs_and_releases(monkeypatch):
     assert controller._thread is None
 
 
-def test_controller_default_workload_runs_matmul_not_relu(monkeypatch):
+def test_controller_default_workload_runs_matmul_and_relu(monkeypatch):
     from keep_npu.single_npu_controller import ascend_npu_controller as module
 
     fake = FakeTorch(count=1)
@@ -189,16 +238,144 @@ def test_controller_default_workload_runs_matmul_not_relu(monkeypatch):
     controller = module.AscendNPUController(
         rank=0,
         interval=0.01,
-        vram_to_keep="1MiB",
+        vram_to_keep="1GiB",
+        busy_threshold=-1,
+    )
+    cube_started = threading.Event()
+    vector_started = threading.Event()
+    fake.on_matmul = lambda _calls: cube_started.set()
+    fake.on_relu = lambda _calls: vector_started.set()
+
+    controller.keep()
+    try:
+        assert cube_started.wait(timeout=1.0)
+        assert vector_started.wait(timeout=1.0)
+    finally:
+        controller.release()
+
+    assert fake.matmul_calls >= 1
+    assert fake.relu_calls >= 1
+    assert fake.matmul_streams
+    assert fake.relu_streams
+    assert set(fake.matmul_streams).isdisjoint(fake.relu_streams)
+
+
+def test_mixed_allocation_uses_one_budget_and_two_streams(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    controller = module.AscendNPUController(rank=0, vram_to_keep="1GiB")
+
+    allocation = controller._allocate_mixed(controller.vram_to_keep)
+
+    assert allocation.left["device"] == "npu:0"
+    assert allocation.right["device"] == "npu:0"
+    assert allocation.output["device"] == "npu:0"
+    assert allocation.vectors
+    assert allocation.cube_stream is not allocation.vector_stream
+    assert allocation.plan.allocated_bytes == 1024**3
+    assert sum(item["elements"] for item in allocation.vectors) == (
+        allocation.plan.vector_elements
+    )
+
+
+def test_mixed_batch_routes_operations_to_distinct_streams(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    controller = module.AscendNPUController(rank=0, vram_to_keep="1GiB")
+    allocation = controller._allocate_mixed(controller.vram_to_keep)
+    controller._stop_evt = threading.Event()
+    cube_started = threading.Event()
+    vector_started = threading.Event()
+
+    def on_matmul(calls):
+        cube_started.set()
+        vector_started.wait(timeout=1.0)
+        if calls == 2:
+            controller._stop_evt.set()
+
+    fake.on_matmul = on_matmul
+    fake.on_relu = lambda _calls: vector_started.set()
+
+    controller._run_mixed_batch(allocation)
+
+    assert cube_started.is_set()
+    assert vector_started.is_set()
+    assert fake.matmul_streams
+    assert fake.relu_streams
+    assert set(fake.matmul_streams) == {allocation.cube_stream}
+    assert set(fake.relu_streams) == {allocation.vector_stream}
+
+
+@pytest.mark.parametrize(
+    ("failed_engine", "message"),
+    [
+        ("cube", "cube feeder failed: cube stream failed"),
+        ("vector", "vector feeder failed: vector stream failed"),
+    ],
+)
+def test_mixed_feeder_failure_stops_batch_and_preserves_engine(
+    monkeypatch, failed_engine, message
+):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    controller = module.AscendNPUController(rank=0, vram_to_keep="1GiB")
+    allocation = controller._allocate_mixed(controller.vram_to_keep)
+    controller._stop_evt = threading.Event()
+    if failed_engine == "cube":
+        fake.on_matmul = lambda _calls: (_ for _ in ()).throw(
+            RuntimeError("cube stream failed")
+        )
+    else:
+        fake.on_relu = lambda _calls: (_ for _ in ()).throw(
+            RuntimeError("vector stream failed")
+        )
+
+    with pytest.raises(RuntimeError, match=message):
+        controller._run_mixed_batch(allocation)
+
+    assert not [
+        thread
+        for thread in threading.enumerate()
+        if thread.name in {"npu-cube-0", "npu-vector-0"}
+    ]
+
+
+def test_mixed_runtime_failure_reaches_allocation_status(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    fake.on_matmul = lambda _calls: (_ for _ in ()).throw(
+        RuntimeError("cube runtime failed")
+    )
+    controller = module.AscendNPUController(
+        rank=0,
+        vram_to_keep="1GiB",
         busy_threshold=-1,
     )
 
     controller.keep()
-    controller.release()
+    try:
+        deadline = time.monotonic() + 1.0
+        while controller.allocation_status() is None and time.monotonic() < deadline:
+            time.sleep(0.001)
 
-    assert fake.matmul_calls >= 1
-    assert fake.relu_calls == 0
-    assert fake.npu.sync_calls >= 1
+        assert str(controller.allocation_status()) == (
+            "rank 0: unexpected Ascend keep worker failure: "
+            "cube feeder failed: cube runtime failed"
+        )
+    finally:
+        controller.release()
 
 
 def test_aicore_allocation_uses_selected_device_and_budget(monkeypatch):
@@ -207,7 +384,9 @@ def test_aicore_allocation_uses_selected_device_and_budget(monkeypatch):
     fake = FakeTorch(count=2)
     monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
     monkeypatch.setattr(module, "visible_torch_device_count", lambda: 2)
-    controller = module.AscendNPUController(rank=1, vram_to_keep="1MiB")
+    controller = module.AscendNPUController(
+        rank=1, vram_to_keep="1MiB", workload="aicore"
+    )
 
     allocation = controller._allocate_aicore(controller.vram_to_keep)
 
@@ -221,13 +400,13 @@ def test_aicore_batch_observes_stop_event(monkeypatch):
     fake = FakeTorch(count=1)
     monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
     monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
-    controller = module.AscendNPUController(rank=0, vram_to_keep="1MiB")
+    controller = module.AscendNPUController(
+        rank=0, vram_to_keep="1MiB", workload="aicore"
+    )
     controller._stop_evt = threading.Event()
     fake.on_matmul = lambda calls: controller._stop_evt.set() if calls == 2 else None
 
-    controller._run_aicore_batch(
-        controller._allocate_aicore(controller.vram_to_keep)
-    )
+    controller._run_aicore_batch(controller._allocate_aicore(controller.vram_to_keep))
 
     assert fake.matmul_calls == 2
 
@@ -243,6 +422,7 @@ def test_unconditional_mode_does_not_sleep_between_compute_batches(monkeypatch):
         interval=60,
         vram_to_keep="1MiB",
         busy_threshold=-1,
+        workload="aicore",
     )
 
     class RecordingEvent:
@@ -290,7 +470,7 @@ def test_controller_surfaces_startup_device_failure(monkeypatch):
     monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
     monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
     controller = module.AscendNPUController(
-        rank=0, vram_to_keep=1536, busy_threshold=-1
+        rank=0, vram_to_keep=1536, busy_threshold=-1, workload="aicore"
     )
 
     with pytest.raises(RuntimeError, match="NPU lost"):
@@ -306,7 +486,9 @@ def test_controller_rejects_retry_while_worker_is_stopping(monkeypatch):
     fake = FakeTorch(count=1)
     monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
     monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
-    controller = module.AscendNPUController(rank=0, vram_to_keep=1536)
+    controller = module.AscendNPUController(
+        rank=0, vram_to_keep=1536, workload="aicore"
+    )
 
     class AliveThread:
         def is_alive(self):
