@@ -1830,7 +1830,9 @@ def test_mcp_tools_call_out_of_range_npu_ids_returns_tool_error(monkeypatch):
         assert "result" in resp
         result = resp["result"]
         assert result["isError"] is True
-        assert "npu_ids must match listed visible NPU IDs" in result["content"][0]["text"]
+        assert (
+            "npu_ids must match listed visible NPU IDs" in result["content"][0]["text"]
+        )
         assert server.status()["active_jobs"] == []
     finally:
         server.shutdown()

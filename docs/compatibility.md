@@ -26,10 +26,12 @@ Intentional backend differences:
 - `npu-smi` formats differ across Ascend products and driver versions. KeepNPU
   treats telemetry as best effort and returns nullable metrics when a value
   cannot be established safely.
-- KeepNPU defaults to preallocated FP16 matrix multiplication on Ascend's AI
-  Core/Cube pipeline so the workload appears in `nputop` UTL. The optional
-  `--workload vector` extension retains the 5,000-pass in-place ReLU batch for
-  users who explicitly prefer a lighter AI Vector workload. Its busy threshold
-  uses Ascend's total NPU utilization, including AI Vector work.
+- KeepNPU defaults to a mixed Ascend workload: preallocated FP16 matrix
+  multiplication drives AI Core/Cube while independent Vector operations drive
+  AI Vector and HBM bandwidth concurrently. `--vram` remains one capacity
+  budget shared by both engines, not a requested bandwidth percentage. The
+  explicit `--workload aicore` and `--workload vector` modes retain the
+  single-engine compatibility paths. Busy-threshold decisions use Ascend's
+  total NPU utilization, including AI Vector work.
 - Hardware/vendor setup is not declared as a PyPI dependency because PyTorch,
   `torch_npu`, CANN, and the driver must be installed as a compatible set.

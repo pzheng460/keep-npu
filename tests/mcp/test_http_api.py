@@ -257,7 +257,7 @@ def test_http_rejects_cross_origin_text_plain_state_change():
     server = make_server()
     httpd, thread, _base = _start_http_server(server)
     host, port = httpd.server_address
-    body = b'{}'
+    body = b"{}"
     request = (
         "POST /api/sessions HTTP/1.1\r\n"
         f"Host: {host}:{port}\r\n"
@@ -1837,9 +1837,9 @@ def test_http_status_reports_runtime_failed_session():
                 "params": {
                     "npu_ids": [0],
                     "vram": "256MB",
-                        "interval": 20,
-                        "busy_threshold": 25,
-                        "workload": "mixed",
+                    "interval": 20,
+                    "busy_threshold": 25,
+                    "workload": "mixed",
                 },
                 "state": "runtime_failed",
                 "last_error": "rank 0: allocation retries exhausted",
@@ -2273,10 +2273,10 @@ def test_http_status_reports_starting_session_during_controller_keep():
         expected_params = {
             "npu_ids": [0],
             "vram": "512MB",
-                "interval": 7,
-                "busy_threshold": 25,
-                "workload": "mixed",
-            }
+            "interval": 7,
+            "busy_threshold": 25,
+            "workload": "mixed",
+        }
         _, list_payload = _request_json("GET", f"{base}/api/sessions")
         assert list_payload["active_jobs"] == [
             {

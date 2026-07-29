@@ -2422,9 +2422,7 @@ def test_status_outputs_json_error_for_malformed_rpc_success_envelope(monkeypatc
 def test_blocking_mode_defaults_to_eco_safe_busy_threshold(monkeypatch):
     called = {}
 
-    def fake_run(
-        interval, npu_ids, vram, legacy_threshold, busy_threshold, workload
-    ):
+    def fake_run(interval, npu_ids, vram, legacy_threshold, busy_threshold, workload):
         called["args"] = (
             interval,
             npu_ids,
@@ -2447,9 +2445,7 @@ def test_blocking_mode_defaults_to_eco_safe_busy_threshold(monkeypatch):
 def test_blocking_mode_preserves_explicit_unconditional_busy_threshold(monkeypatch):
     called = {}
 
-    def fake_run(
-        interval, npu_ids, vram, legacy_threshold, busy_threshold, workload
-    ):
+    def fake_run(interval, npu_ids, vram, legacy_threshold, busy_threshold, workload):
         called["args"] = (
             interval,
             npu_ids,
