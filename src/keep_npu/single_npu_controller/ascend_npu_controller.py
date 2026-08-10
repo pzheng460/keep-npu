@@ -8,12 +8,15 @@ from dataclasses import dataclass
 from typing import Any, List, Optional
 
 from keep_npu.single_npu_controller.base_npu_controller import BaseNPUController
+from keep_npu.single_npu_controller.random_workload import RandomPhaseScheduler
 from keep_npu.single_npu_controller.workload import (
     AICORE_BATCH_ITERATIONS,
     AICorePlan,
     MixedPlan,
+    RandomPlan,
     plan_aicore_workload,
     plan_mixed_workload,
+    plan_random_workload,
 )
 from keep_npu.utilities.logger import setup_logger
 from keep_npu.utilities.npu_monitor import get_npu_utilization
@@ -40,6 +43,11 @@ MIXED_UNCONDITIONAL_BATCH_SECONDS = 60.0
 MIXED_FEEDER_JOIN_TIMEOUT = 5.0
 MIXED_CUBE_CHUNK = 4
 MIXED_VECTOR_CHUNK = 64
+RANDOM_QUANTUM_SECONDS = 0.1
+RANDOM_CUBE_CHUNK = 1
+RANDOM_VECTOR_CHUNK = 8
+RANDOM_HBM_CHUNK = 8
+RANDOM_FEEDER_JOIN_TIMEOUT = 5.0
 ASCEND_STARTUP_TIMEOUT_SECONDS = 30.0
 
 
@@ -68,6 +76,23 @@ class MixedAllocation:
     vector_stream: Any
 
 
+@dataclass
+class RandomAllocation:
+    """Disjoint tensors and streams for random Cube, Vector, and HBM pressure."""
+
+    left: Any
+    right: Any
+    output: Any
+    vector: Any
+    hbm_source: Any
+    hbm_target: Any
+    reserves: List[Any]
+    plan: RandomPlan
+    cube_stream: Any
+    vector_stream: Any
+    hbm_stream: Any
+
+
 class AscendNPUController(BaseNPUController):
     def __init__(
         self,
@@ -85,6 +110,8 @@ class AscendNPUController(BaseNPUController):
         self.workload = validate_workload(workload)
         if self.workload == "mixed":
             plan_mixed_workload(self.vram_to_keep)
+        elif self.workload == "random":
+            plan_random_workload(self.vram_to_keep)
         elif self.workload == "aicore":
             plan_aicore_workload(self.vram_to_keep)
         self.iterations = validate_positive_integer(iterations, "iterations")
@@ -96,6 +123,7 @@ class AscendNPUController(BaseNPUController):
         self._failure_exc: Optional[Exception] = None
         self._num_elements: Optional[int] = None
         self._startup_timeout_seconds = ASCEND_STARTUP_TIMEOUT_SECONDS
+        self._random_scheduler_factory = RandomPhaseScheduler
 
     def keep(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -155,6 +183,7 @@ class AscendNPUController(BaseNPUController):
         stop_evt.set()
         join_timeout = max(
             MIXED_FEEDER_JOIN_TIMEOUT + 1.0,
+            RANDOM_FEEDER_JOIN_TIMEOUT + 1.0,
             min(float(self.interval) + 2.0, 30.0),
         )
         thread.join(timeout=join_timeout)
@@ -242,9 +271,40 @@ class AscendNPUController(BaseNPUController):
             vector_stream=vector_stream,
         )
 
+    def _allocate_random(self, num_elements: int) -> RandomAllocation:
+        plan = plan_random_workload(num_elements)
+        shape = (plan.matrix_dim, plan.matrix_dim)
+        common = {
+            "device": self.device,
+            "dtype": self._torch.float16,
+            "requires_grad": False,
+        }
+        left = self._torch.rand(shape, **common)
+        right = self._torch.rand(shape, **common)
+        output = self._torch.empty(shape, **common)
+        vector = self._allocate_vector(plan.vector_elements)[0]
+        hbm_source = self._allocate_vector(plan.hbm_buffer_elements)[0]
+        hbm_target = self._allocate_reserve(plan.hbm_buffer_elements)[0]
+        reserves = self._allocate_reserve(plan.reserve_elements)
+        return RandomAllocation(
+            left=left,
+            right=right,
+            output=output,
+            vector=vector,
+            hbm_source=hbm_source,
+            hbm_target=hbm_target,
+            reserves=reserves,
+            plan=plan,
+            cube_stream=self._torch.npu.Stream(device=self.device),
+            vector_stream=self._torch.npu.Stream(device=self.device),
+            hbm_stream=self._torch.npu.Stream(device=self.device),
+        )
+
     def _allocate_workload(self, num_elements: int) -> Any:
         if self.workload == "mixed":
             return self._allocate_mixed(num_elements)
+        if self.workload == "random":
+            return self._allocate_random(num_elements)
         if self.workload == "aicore":
             return self._allocate_aicore(num_elements)
         return self._allocate_vector(num_elements)
@@ -442,9 +502,163 @@ class AscendNPUController(BaseNPUController):
             engine, exc = failures[0]
             raise RuntimeError(f"{engine} feeder failed: {exc}") from exc
 
+    def _run_random_session(self, allocation: RandomAllocation) -> None:
+        stop_evt = self._stop_evt
+        if stop_evt is None:
+            raise RuntimeError("stop event not initialized")
+        scheduler = self._random_scheduler_factory()
+        cancel = threading.Event()
+        failures: list[tuple[str, Exception]] = []
+        failure_lock = threading.Lock()
+        state_lock = threading.Lock()
+        state: dict[str, Any] = {"enabled": False, "snapshot": None}
+
+        def should_stop() -> bool:
+            return cancel.is_set() or stop_evt.is_set()
+
+        def record_failure(engine: str, exc: Exception) -> None:
+            with failure_lock:
+                if not failures:
+                    failures.append((engine, exc))
+            cancel.set()
+
+        def current_duty(engine: str) -> float:
+            with state_lock:
+                snapshot = state["snapshot"]
+                if not state["enabled"] or snapshot is None:
+                    return 0.0
+                return float(getattr(snapshot, f"{engine}_duty"))
+
+        def run_duty_cycle(engine: str, operation: Any, stream: Any) -> None:
+            try:
+                self._torch.npu.set_device(self.rank)
+                with self._torch.npu.stream(stream):
+                    while not should_stop():
+                        quantum_started = time.monotonic()
+                        active_deadline = quantum_started + (
+                            RANDOM_QUANTUM_SECONDS * current_duty(engine)
+                        )
+                        while not should_stop() and time.monotonic() < active_deadline:
+                            operation()
+                        stream.synchronize()
+                        remaining = RANDOM_QUANTUM_SECONDS - (
+                            time.monotonic() - quantum_started
+                        )
+                        if remaining > 0:
+                            cancel.wait(remaining)
+            except Exception as exc:
+                record_failure(engine, exc)
+
+        def cube_operation() -> None:
+            for _ in range(RANDOM_CUBE_CHUNK):
+                if should_stop():
+                    break
+                self._torch.matmul(
+                    allocation.left,
+                    allocation.right,
+                    out=allocation.output,
+                )
+
+        def vector_operation() -> None:
+            for _ in range(RANDOM_VECTOR_CHUNK):
+                if should_stop():
+                    break
+                self._torch.sin(allocation.vector, out=allocation.vector)
+
+        hbm_direction = [False]
+
+        def hbm_operation() -> None:
+            for _ in range(RANDOM_HBM_CHUNK):
+                if should_stop():
+                    break
+                if hbm_direction[0]:
+                    allocation.hbm_source.copy_(
+                        allocation.hbm_target, non_blocking=True
+                    )
+                else:
+                    allocation.hbm_target.copy_(
+                        allocation.hbm_source, non_blocking=True
+                    )
+                hbm_direction[0] = not hbm_direction[0]
+
+        feeders = [
+            threading.Thread(
+                target=run_duty_cycle,
+                args=("cube", cube_operation, allocation.cube_stream),
+                name=f"npu-random-cube-{self.rank}",
+                daemon=True,
+            ),
+            threading.Thread(
+                target=run_duty_cycle,
+                args=("vector", vector_operation, allocation.vector_stream),
+                name=f"npu-random-vector-{self.rank}",
+                daemon=True,
+            ),
+            threading.Thread(
+                target=run_duty_cycle,
+                args=("hbm", hbm_operation, allocation.hbm_stream),
+                name=f"npu-random-hbm-{self.rank}",
+                daemon=True,
+            ),
+        ]
+        for feeder in feeders:
+            feeder.start()
+
+        coordinator_failure: Optional[Exception] = None
+        try:
+            last_update = time.monotonic()
+            next_probe = last_update
+            enabled = self.busy_threshold < 0
+            previous_profile: Optional[str] = None
+            while not should_stop():
+                now = time.monotonic()
+                if self.busy_threshold >= 0 and now >= next_probe:
+                    utilization = self._monitor_utilization(self.rank)
+                    enabled = self._should_run_batch(utilization, self.busy_threshold)
+                    next_probe = now + self.interval
+                active_seconds = max(0.0, now - last_update) if enabled else 0.0
+                snapshot = scheduler.advance(active_seconds)
+                last_update = now
+                with state_lock:
+                    state["enabled"] = enabled
+                    state["snapshot"] = snapshot
+                if snapshot.profile != previous_profile:
+                    logger.debug(
+                        "rank %s: random workload phase %s "
+                        "(Cube %.0f%%, Vector %.0f%%, HBM %.0f%%)",
+                        self.rank,
+                        snapshot.profile,
+                        snapshot.target_cube_duty * 100,
+                        snapshot.target_vector_duty * 100,
+                        snapshot.target_hbm_duty * 100,
+                    )
+                    previous_profile = snapshot.profile
+                cancel.wait(RANDOM_QUANTUM_SECONDS)
+        except Exception as exc:
+            coordinator_failure = exc
+        finally:
+            cancel.set()
+
+        join_deadline = time.monotonic() + RANDOM_FEEDER_JOIN_TIMEOUT
+        for feeder in feeders:
+            feeder.join(timeout=max(0.0, join_deadline - time.monotonic()))
+        stuck = [feeder.name for feeder in feeders if feeder.is_alive()]
+        if stuck:
+            raise TimeoutError(
+                f"random feeder threads did not stop: {', '.join(stuck)}"
+            )
+        if failures:
+            engine, exc = failures[0]
+            raise RuntimeError(f"{engine} feeder failed: {exc}") from exc
+        if coordinator_failure is not None:
+            raise coordinator_failure
+
     def _run_batch(self, allocation: Any) -> None:
         if self.workload == "mixed":
             self._run_mixed_batch(allocation)
+            return
+        if self.workload == "random":
+            self._run_random_session(allocation)
             return
         if self.workload == "aicore":
             self._run_aicore_batch(allocation)

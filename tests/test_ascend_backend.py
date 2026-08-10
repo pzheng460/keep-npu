@@ -4,6 +4,32 @@ import time
 import pytest
 
 
+def full_random_snapshot():
+    from keep_npu.single_npu_controller.random_workload import PhaseSnapshot
+
+    return PhaseSnapshot(
+        profile="balanced",
+        cube_duty=1.0,
+        vector_duty=1.0,
+        hbm_duty=1.0,
+        target_cube_duty=1.0,
+        target_vector_duty=1.0,
+        target_hbm_duty=1.0,
+        duration=30.0,
+        ramp_duration=2.0,
+        elapsed=3.0,
+    )
+
+
+class FixedRandomScheduler:
+    def __init__(self):
+        self.advances = []
+
+    def advance(self, seconds):
+        self.advances.append(seconds)
+        return full_random_snapshot()
+
+
 class FakeStream:
     def __init__(self, fake, device=None):
         self.fake = fake
@@ -26,6 +52,23 @@ class FakeStreamContext:
 
     def __exit__(self, exc_type, exc, tb):
         self.fake.stream_state.active = self.previous
+
+
+class FakeTensor(dict):
+    def __init__(self, fake, values):
+        super().__init__(values)
+        self.fake = fake
+
+    def copy_(self, source, *, non_blocking=False):
+        with self.fake.operation_lock:
+            self.fake.copy_calls += 1
+            calls = self.fake.copy_calls
+            self.fake.copy_streams.append(
+                getattr(self.fake.stream_state, "active", None)
+            )
+        if self.fake.on_copy is not None:
+            self.fake.on_copy(calls)
+        return self
 
 
 class FakeNPU:
@@ -81,25 +124,31 @@ class FakeTorch:
         self.allocations = []
         self.matmul_calls = 0
         self.relu_calls = 0
+        self.sin_calls = 0
+        self.copy_calls = 0
         self.on_matmul = None
         self.on_relu = None
+        self.on_sin = None
+        self.on_copy = None
         self.stream_state = threading.local()
         self.operation_lock = threading.Lock()
         self.matmul_streams = []
         self.relu_streams = []
+        self.sin_streams = []
+        self.copy_streams = []
 
     def device(self, value):
         return value
 
     def rand(self, *shape, **kwargs):
-        tensor = {"shape": shape, "factory": "rand", **kwargs}
+        tensor = FakeTensor(self, {"shape": shape, "factory": "rand", **kwargs})
         if len(shape) == 1 and isinstance(shape[0], int):
             tensor["elements"] = shape[0]
         self.allocations.append(tensor)
         return tensor
 
     def empty(self, *shape, **kwargs):
-        tensor = {"shape": shape, "factory": "empty", **kwargs}
+        tensor = FakeTensor(self, {"shape": shape, "factory": "empty", **kwargs})
         if len(shape) == 1 and isinstance(shape[0], int):
             tensor["elements"] = shape[0]
         self.allocations.append(tensor)
@@ -122,6 +171,15 @@ class FakeTorch:
         if self.on_relu is not None:
             self.on_relu(calls)
         return tensor
+
+    def sin(self, tensor, *, out):
+        with self.operation_lock:
+            self.sin_calls += 1
+            calls = self.sin_calls
+            self.sin_streams.append(getattr(self.stream_state, "active", None))
+        if self.on_sin is not None:
+            self.on_sin(calls)
+        return out
 
 
 def test_visible_count_uses_torch_npu(monkeypatch):
@@ -329,6 +387,169 @@ def test_mixed_allocation_uses_one_budget_and_two_streams(monkeypatch):
     assert sum(item["elements"] for item in allocation.vectors) == (
         allocation.plan.vector_elements
     )
+
+
+def test_random_allocation_uses_one_budget_and_three_streams(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+    from keep_npu.single_npu_controller import workload
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    controller = module.AscendNPUController(
+        rank=0, vram_to_keep="1GiB", workload="random"
+    )
+
+    allocation = controller._allocate_random(controller.vram_to_keep)
+
+    assert allocation.plan.allocated_bytes == 1024**3
+    assert allocation.vector["elements"] * 4 == workload.RANDOM_VECTOR_BYTES
+    assert (
+        allocation.hbm_source["elements"] + allocation.hbm_target["elements"]
+    ) * 4 == workload.RANDOM_HBM_BYTES
+    assert sum(item["elements"] for item in allocation.reserves) == (
+        allocation.plan.reserve_elements
+    )
+    assert (
+        len({allocation.cube_stream, allocation.vector_stream, allocation.hbm_stream})
+        == 3
+    )
+
+
+def test_random_session_routes_all_engines_to_distinct_streams(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    monkeypatch.setattr(module, "RANDOM_QUANTUM_SECONDS", 0.005)
+    controller = module.AscendNPUController(
+        rank=0, vram_to_keep="1GiB", workload="random", busy_threshold=-1
+    )
+    scheduler = FixedRandomScheduler()
+    controller._random_scheduler_factory = lambda: scheduler
+    allocation = controller._allocate_random(controller.vram_to_keep)
+    controller._stop_evt = threading.Event()
+    engines = set()
+    lock = threading.Lock()
+
+    def record(engine):
+        with lock:
+            engines.add(engine)
+            if engines == {"cube", "vector", "hbm"}:
+                controller._stop_evt.set()
+
+    fake.on_matmul = lambda _calls: record("cube")
+    fake.on_sin = lambda _calls: record("vector")
+    fake.on_copy = lambda _calls: record("hbm")
+
+    controller._run_random_session(allocation)
+
+    assert engines == {"cube", "vector", "hbm"}
+    assert set(fake.matmul_streams) == {allocation.cube_stream}
+    assert set(fake.sin_streams) == {allocation.vector_stream}
+    assert set(fake.copy_streams) == {allocation.hbm_stream}
+    assert scheduler.advances
+
+
+def test_random_busy_backoff_freezes_scheduler_and_engines(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    controller = module.AscendNPUController(
+        rank=0,
+        interval=0.001,
+        vram_to_keep="1GiB",
+        workload="random",
+        busy_threshold=25,
+    )
+    controller._stop_evt = threading.Event()
+
+    class StopAfterPausedAdvance(FixedRandomScheduler):
+        def advance(self, seconds):
+            result = super().advance(seconds)
+            controller._stop_evt.set()
+            return result
+
+    scheduler = StopAfterPausedAdvance()
+    controller._random_scheduler_factory = lambda: scheduler
+    controller._monitor_utilization = lambda _rank: 100
+
+    controller._run_random_session(controller._allocate_random(controller.vram_to_keep))
+
+    assert scheduler.advances == [0.0]
+    assert fake.matmul_calls == fake.sin_calls == fake.copy_calls == 0
+
+
+def test_random_coordinator_failure_stops_all_feeders(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    monkeypatch.setattr(module, "RANDOM_QUANTUM_SECONDS", 0.005)
+    controller = module.AscendNPUController(
+        rank=0,
+        interval=0.001,
+        vram_to_keep="1GiB",
+        workload="random",
+        busy_threshold=25,
+    )
+    controller._stop_evt = threading.Event()
+    controller._monitor_utilization = lambda _rank: (_ for _ in ()).throw(
+        RuntimeError("telemetry failed")
+    )
+
+    with pytest.raises(RuntimeError, match="telemetry failed"):
+        controller._run_random_session(
+            controller._allocate_random(controller.vram_to_keep)
+        )
+
+    assert not [
+        thread
+        for thread in threading.enumerate()
+        if thread.name.startswith("npu-random-")
+    ]
+
+
+@pytest.mark.parametrize("failed_engine", ["cube", "vector", "hbm"])
+def test_random_feeder_failure_stops_session_and_names_engine(
+    monkeypatch, failed_engine
+):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    monkeypatch.setattr(module, "RANDOM_QUANTUM_SECONDS", 0.005)
+    controller = module.AscendNPUController(
+        rank=0, vram_to_keep="1GiB", workload="random", busy_threshold=-1
+    )
+    controller._stop_evt = threading.Event()
+    controller._random_scheduler_factory = FixedRandomScheduler
+    callback_name = {"cube": "on_matmul", "vector": "on_sin", "hbm": "on_copy"}[
+        failed_engine
+    ]
+    setattr(
+        fake,
+        callback_name,
+        lambda _calls: (_ for _ in ()).throw(RuntimeError("stream failed")),
+    )
+
+    with pytest.raises(
+        RuntimeError, match=rf"{failed_engine} feeder failed: stream failed"
+    ):
+        controller._run_random_session(
+            controller._allocate_random(controller.vram_to_keep)
+        )
+
+    assert not [
+        thread
+        for thread in threading.enumerate()
+        if thread.name.startswith("npu-random-")
+    ]
 
 
 def test_large_mixed_allocation_keeps_reserve_out_of_the_vector_hot_path(monkeypatch):
