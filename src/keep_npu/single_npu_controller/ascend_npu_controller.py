@@ -93,6 +93,22 @@ class RandomAllocation:
     hbm_stream: Any
 
 
+def _raise_random_session_error(
+    *,
+    failures: list[tuple[str, Exception]],
+    coordinator_failure: Optional[Exception],
+    stuck: list[str],
+) -> None:
+    """Raise the original runtime error before any cleanup-only timeout."""
+    if failures:
+        engine, exc = failures[0]
+        raise RuntimeError(f"{engine} feeder failed: {exc}") from exc
+    if coordinator_failure is not None:
+        raise coordinator_failure
+    if stuck:
+        raise TimeoutError(f"random feeder threads did not stop: {', '.join(stuck)}")
+
+
 class AscendNPUController(BaseNPUController):
     def __init__(
         self,
@@ -647,15 +663,11 @@ class AscendNPUController(BaseNPUController):
         for feeder in feeders:
             feeder.join(timeout=max(0.0, join_deadline - time.monotonic()))
         stuck = [feeder.name for feeder in feeders if feeder.is_alive()]
-        if stuck:
-            raise TimeoutError(
-                f"random feeder threads did not stop: {', '.join(stuck)}"
-            )
-        if failures:
-            engine, exc = failures[0]
-            raise RuntimeError(f"{engine} feeder failed: {exc}") from exc
-        if coordinator_failure is not None:
-            raise coordinator_failure
+        _raise_random_session_error(
+            failures=failures,
+            coordinator_failure=coordinator_failure,
+            stuck=stuck,
+        )
 
     def _run_batch(self, allocation: Any) -> None:
         if self.workload == "mixed":

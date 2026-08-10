@@ -552,6 +552,21 @@ def test_random_coordinator_failure_stops_all_feeders(monkeypatch):
     ]
 
 
+def test_random_session_preserves_original_failure_over_cleanup_timeout():
+    from keep_npu.single_npu_controller.ascend_npu_controller import (
+        _raise_random_session_error,
+    )
+
+    original = RuntimeError("stream failed")
+
+    with pytest.raises(RuntimeError, match="cube feeder failed: stream failed"):
+        _raise_random_session_error(
+            failures=[("cube", original)],
+            coordinator_failure=None,
+            stuck=["npu-random-vector-0"],
+        )
+
+
 @pytest.mark.parametrize("failed_engine", ["cube", "vector", "hbm"])
 def test_random_feeder_failure_stops_session_and_names_engine(
     monkeypatch, failed_engine
