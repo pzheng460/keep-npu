@@ -540,6 +540,10 @@ class AscendNPUController(BaseNPUController):
                         )
                         while not should_stop() and time.monotonic() < active_deadline:
                             operation()
+                            # Include device execution in the active budget. Without
+                            # this synchronization, asynchronous kernels can queue
+                            # beyond the intended duty-cycle window.
+                            stream.synchronize()
                         stream.synchronize()
                         remaining = RANDOM_QUANTUM_SECONDS - (
                             time.monotonic() - quantum_started

@@ -390,8 +390,7 @@ def test_mixed_allocation_uses_one_budget_and_two_streams(monkeypatch):
 
 
 def test_random_allocation_uses_one_budget_and_three_streams(monkeypatch):
-    from keep_npu.single_npu_controller import ascend_npu_controller as module
-    from keep_npu.single_npu_controller import workload
+    from keep_npu.single_npu_controller import ascend_npu_controller as module, workload
 
     fake = FakeTorch(count=1)
     monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
@@ -450,6 +449,45 @@ def test_random_session_routes_all_engines_to_distinct_streams(monkeypatch):
     assert set(fake.sin_streams) == {allocation.vector_stream}
     assert set(fake.copy_streams) == {allocation.hbm_stream}
     assert scheduler.advances
+
+
+def test_random_cube_duty_accounts_for_device_execution_time(monkeypatch):
+    from keep_npu.single_npu_controller import ascend_npu_controller as module
+
+    fake = FakeTorch(count=1)
+    monkeypatch.setattr(module, "load_torch_npu", lambda: fake)
+    monkeypatch.setattr(module, "visible_torch_device_count", lambda: 1)
+    monkeypatch.setattr(module, "RANDOM_QUANTUM_SECONDS", 1.0)
+    controller = module.AscendNPUController(
+        rank=0, vram_to_keep="1GiB", workload="random", busy_threshold=-1
+    )
+    controller._stop_evt = threading.Event()
+
+    class CubeOnlyScheduler:
+        def advance(self, _seconds):
+            snapshot = full_random_snapshot()
+            return type(snapshot)(
+                **{
+                    **snapshot.__dict__,
+                    "vector_duty": 0.0,
+                    "hbm_duty": 0.0,
+                }
+            )
+
+    controller._random_scheduler_factory = CubeOnlyScheduler
+    allocation = controller._allocate_random(controller.vram_to_keep)
+    syncs_before_second_matmul = []
+
+    def stop_after_two_matmuls(calls):
+        if calls == 2:
+            syncs_before_second_matmul.append(allocation.cube_stream.sync_calls)
+            controller._stop_evt.set()
+
+    fake.on_matmul = stop_after_two_matmuls
+
+    controller._run_random_session(allocation)
+
+    assert syncs_before_second_matmul == [2]
 
 
 def test_random_busy_backoff_freezes_scheduler_and_engines(monkeypatch):

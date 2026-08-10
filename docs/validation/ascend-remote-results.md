@@ -217,3 +217,58 @@ healthy 910B2 device.
 Release supervision now gives the mixed feeders a consistent bounded shutdown
 window. Multi-device release stops all workers in parallel and performs one
 process-wide allocator cache flush instead of six redundant concurrent flushes.
+
+## Random Cube, Vector, and HBM phases — 2026-08-10
+
+The random-mode release candidate was built as a local 1.0.5 wheel and
+installed without dependencies in a uniquely named `--system-site-packages`
+virtual environment. Validation used the `sr_npu_bench` container on `npu0`,
+whose `ASCEND_RT_VISIBLE_DEVICES=0` maps its sole visible ordinal to physical
+device 0. That device was the only healthy device without an NPU process at
+the pre-test audit. Devices 1–7 on `npu0` and all eight Warning-health devices
+on `npu2` had existing VLLM or Ray processes and were not touched.
+
+The public command was:
+
+```console
+keep-npu --workload random --npu-ids 0 --vram 1GiB \
+  --interval 60 --busy-threshold -1
+```
+
+The first hardware pass exposed an asynchronous duty-cycle error: a Vector
+phase targeting 28% Cube still reported 93% AI Core because the Cube feeder
+queued kernels for an entire host-side window before synchronizing. A focused
+regression was added, and random feeders now synchronize each bounded work
+block so device execution time counts against the active portion of the
+quantum. Existing `mixed` tuning was not changed.
+
+After calibration, DEBUG phase transitions and representative `npu-smi info
+-t usages` readings were:
+
+| Phase | Target Cube / Vector / HBM | AI Core | AI Vector | HBM bandwidth | Total NPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Vector-intensive | 31 / 87 / 66% | 1% | 82% | 55% | 96% |
+| Cube-intensive | 91 / 28 / 59% | 92% | 47% | 71% | 100% |
+| HBM-intensive | 38 / 54 / 96% | 50% | 73% | 75% | 86% |
+| Balanced | 62 / 56 / 84% | 89% | 58% | 81% | 89% |
+
+These readings confirm relative phase trends rather than exact counter
+targets: the named engine was visibly stronger than in at least one other
+captured phase. HBM usage remained at 7% throughout the phase sequence and
+returned to its 5% baseline after release.
+
+A separate foreground run confirmed process selection. `npu-smi info`
+associated the `keep-npu` process only with physical device 0, reporting 1715
+MiB of process memory; all pre-existing processes on devices 1–7 were
+unchanged. SIGTERM produced the normal `Interruption received. Releasing NPUs`
+message, no feeder timeout or release error, and the Docker-observed wrapper
+exit completed in 5377 ms. Post-stop telemetry was 0% AI Core, 0% AI Vector,
+0% HBM bandwidth, and 0% total utilization, with no NPU process on device 0.
+
+All candidate wheels, virtual environments, PID files, and logs were removed
+from the host and container. Two defunct entries from the earlier detached
+validation wrapper remained parented to the container's non-reaping
+`sleep infinity` PID 1; they hold no NPU, memory allocation, executable, log,
+or filesystem artifact. The shared container was deliberately not restarted
+because doing so would exceed the validation scope. The final foreground run
+was reaped normally and added no defunct entry.

@@ -122,9 +122,7 @@ def validate_busy_threshold(busy_threshold: Any) -> int:
 def validate_workload(value: Any) -> str:
     """Validate and normalize the keepalive workload name."""
     if not isinstance(value, str) or value not in PUBLIC_WORKLOADS:
-        raise ValueError(
-            "workload must be 'mixed', 'aicore', 'vector', or 'random'"
-        )
+        raise ValueError("workload must be 'mixed', 'aicore', 'vector', or 'random'")
     return value
 
 

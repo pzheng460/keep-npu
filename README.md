@@ -59,6 +59,18 @@ what create HBM bandwidth pressure. Use `--workload aicore` for Cube-only
 compatibility or `--workload vector` for Vector-and-HBM-only compatibility.
 Neither flag is needed for the default mixed mode.
 
+For less uniform pressure, select the opt-in random workload:
+
+```console
+keep-npu --workload random --npu-ids 0,1 --vram 1GiB \
+  --interval 60 --busy-threshold -1
+```
+
+Random mode keeps the requested HBM resident while changing among Cube-,
+Vector-, HBM-intensive, and balanced phases every 10–60 seconds. Its duty
+cycles shape realistic utilization trends; they are not guarantees of exact
+percentages in `npu-smi` or `nputop`.
+
 ## Service and dashboard
 
 Run the local HTTP service in the foreground:

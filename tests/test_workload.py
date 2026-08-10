@@ -2,8 +2,8 @@ import pytest
 
 from keep_npu.single_npu_controller.workload import (
     FP16_BYTES,
-    MAX_MIXED_MATRIX_DIM,
     MATRIX_COUNT,
+    MAX_MIXED_MATRIX_DIM,
     MIN_MIXED_BYTES,
     MIN_MIXED_VECTOR_BYTES,
     MIN_RANDOM_BYTES,

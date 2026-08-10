@@ -33,12 +33,10 @@ def test_seeded_scheduler_stays_in_bounds_and_never_repeats_profile():
     assert len(snapshots) >= 20
     assert all(10.0 <= item.duration <= 60.0 for item in snapshots)
     assert all(
-        2.0 <= item.ramp_duration <= min(5.0, item.duration / 4)
-        for item in snapshots
+        2.0 <= item.ramp_duration <= min(5.0, item.duration / 4) for item in snapshots
     )
     assert all(
-        left.profile != right.profile
-        for left, right in zip(snapshots, snapshots[1:])
+        left.profile != right.profile for left, right in zip(snapshots, snapshots[1:])
     )
     for item in snapshots:
         profile = next(p for p in PROFILE_DEFINITIONS if p.name == item.profile)

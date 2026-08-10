@@ -31,7 +31,11 @@ Intentional backend differences:
   AI Vector and HBM bandwidth concurrently. `--vram` remains one capacity
   budget shared by both engines, not a requested bandwidth percentage. The
   explicit `--workload aicore` and `--workload vector` modes retain the
-  single-engine compatibility paths. Busy-threshold decisions use Ascend's
-  total NPU utilization, including AI Vector work.
+  compatibility paths. The opt-in `--workload random` mode requires roughly
+  224 MiB at minimum and varies Cube-, Vector-, HBM-intensive, and balanced
+  pressure phases every 10–60 seconds while keeping the requested allocation
+  resident. Public workload values are `mixed`, `aicore`, `vector`, and
+  `random`. Busy-threshold decisions use Ascend's total NPU utilization,
+  including AI Vector work.
 - Hardware/vendor setup is not declared as a PyPI dependency because PyTorch,
   `torch_npu`, CANN, and the driver must be installed as a compatible set.
