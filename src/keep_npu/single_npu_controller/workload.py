@@ -16,6 +16,9 @@ AICORE_BATCH_ITERATIONS = 32
 MIN_AICORE_BYTES = MATRIX_COUNT * MATRIX_ALIGNMENT**2 * FP16_BYTES
 MIN_MIXED_VECTOR_BYTES = 64 * 1024**2
 MIN_MIXED_BYTES = MIN_AICORE_BYTES + MIN_MIXED_VECTOR_BYTES
+RANDOM_VECTOR_BYTES = 64 * 1024**2
+RANDOM_HBM_BYTES = 160 * 1024**2
+MIN_RANDOM_BYTES = MIN_AICORE_BYTES + RANDOM_VECTOR_BYTES + RANDOM_HBM_BYTES
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,17 @@ class MixedPlan:
 
     matrix_dim: int
     vector_elements: int
+    allocated_bytes: int
+
+
+@dataclass(frozen=True)
+class RandomPlan:
+    """Disjoint Cube, Vector, HBM, and reserve allocations in one budget."""
+
+    matrix_dim: int
+    vector_elements: int
+    hbm_buffer_elements: int
+    reserve_elements: int
     allocated_bytes: int
 
 
@@ -69,12 +83,40 @@ def plan_mixed_workload(float32_elements: int) -> MixedPlan:
     return MixedPlan(matrix_dim, vector_elements, allocated_bytes)
 
 
+def plan_random_workload(float32_elements: int) -> RandomPlan:
+    """Plan fixed Cube, Vector, HBM, and reserve regions for random mode."""
+    budget_bytes = float32_elements * 4
+    if budget_bytes < MIN_RANDOM_BYTES:
+        raise ValueError(
+            f"random workload requires --vram of at least {MIN_RANDOM_BYTES} bytes"
+        )
+    active_bytes = RANDOM_VECTOR_BYTES + RANDOM_HBM_BYTES
+    cube_budget = budget_bytes - active_bytes
+    raw_dim = isqrt(cube_budget // (MATRIX_COUNT * FP16_BYTES))
+    matrix_dim = min(MAX_MIXED_MATRIX_DIM, raw_dim)
+    matrix_dim -= matrix_dim % MATRIX_ALIGNMENT
+    matrix_bytes = MATRIX_COUNT * matrix_dim**2 * FP16_BYTES
+    vector_elements = RANDOM_VECTOR_BYTES // 4
+    hbm_buffer_elements = (RANDOM_HBM_BYTES // 2) // 4
+    reserve_elements = (budget_bytes - active_bytes - matrix_bytes) // 4
+    allocated_bytes = matrix_bytes + active_bytes + reserve_elements * 4
+    return RandomPlan(
+        matrix_dim=matrix_dim,
+        vector_elements=vector_elements,
+        hbm_buffer_elements=hbm_buffer_elements,
+        reserve_elements=reserve_elements,
+        allocated_bytes=allocated_bytes,
+    )
+
+
 def validate_workload_vram(workload: object, vram: Union[int, str]) -> int:
     """Validate a workload and its workload-specific VRAM budget locally."""
     normalized_workload = validate_workload(workload)
     float32_elements = parse_vram_to_elements(vram)
     if normalized_workload == "mixed":
         plan_mixed_workload(float32_elements)
+    elif normalized_workload == "random":
+        plan_random_workload(float32_elements)
     elif normalized_workload == "aicore":
         plan_aicore_workload(float32_elements)
     return float32_elements

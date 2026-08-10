@@ -1,12 +1,18 @@
 import pytest
 
 from keep_npu.single_npu_controller.workload import (
+    FP16_BYTES,
     MAX_MIXED_MATRIX_DIM,
+    MATRIX_COUNT,
     MIN_MIXED_BYTES,
     MIN_MIXED_VECTOR_BYTES,
+    MIN_RANDOM_BYTES,
+    RANDOM_HBM_BYTES,
+    RANDOM_VECTOR_BYTES,
     AICorePlan,
     plan_aicore_workload,
     plan_mixed_workload,
+    plan_random_workload,
     validate_workload_vram,
 )
 
@@ -82,3 +88,39 @@ def test_workload_vram_validation_applies_mixed_minimum():
     assert validate_workload_vram("mixed", MIN_MIXED_BYTES) == MIN_MIXED_BYTES // 4
     with pytest.raises(ValueError, match="mixed workload requires --vram"):
         validate_workload_vram("mixed", MIN_MIXED_BYTES - 4)
+
+
+def test_minimum_random_plan_reserves_all_three_engines():
+    plan = plan_random_workload(MIN_RANDOM_BYTES // 4)
+
+    assert plan.matrix_dim == 16
+    assert plan.vector_elements == RANDOM_VECTOR_BYTES // 4
+    assert plan.hbm_buffer_elements == (RANDOM_HBM_BYTES // 2) // 4
+    assert plan.reserve_elements == 0
+    assert plan.allocated_bytes == MIN_RANDOM_BYTES
+
+
+def test_random_plan_rejects_budget_below_minimum():
+    with pytest.raises(
+        ValueError,
+        match=f"random workload requires --vram of at least {MIN_RANDOM_BYTES} bytes",
+    ):
+        plan_random_workload((MIN_RANDOM_BYTES // 4) - 1)
+
+
+def test_one_gib_random_plan_accounts_for_every_byte():
+    plan = plan_random_workload(1024**3 // 4)
+    matrix_bytes = MATRIX_COUNT * plan.matrix_dim**2 * FP16_BYTES
+    active_bytes = plan.vector_elements * 4 + plan.hbm_buffer_elements * 4 * 2
+
+    assert plan.matrix_dim % 16 == 0
+    assert plan.matrix_dim <= MAX_MIXED_MATRIX_DIM
+    assert active_bytes == RANDOM_VECTOR_BYTES + RANDOM_HBM_BYTES
+    assert matrix_bytes + active_bytes + plan.reserve_elements * 4 == 1024**3
+    assert plan.allocated_bytes == 1024**3
+
+
+def test_workload_vram_validation_applies_random_minimum():
+    assert validate_workload_vram("random", MIN_RANDOM_BYTES) == MIN_RANDOM_BYTES // 4
+    with pytest.raises(ValueError, match="random workload requires --vram"):
+        validate_workload_vram("random", MIN_RANDOM_BYTES - 4)

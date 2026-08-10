@@ -180,12 +180,14 @@ def test_validate_workload_accepts_public_values():
     assert validate_workload("mixed") == "mixed"
     assert validate_workload("aicore") == "aicore"
     assert validate_workload("vector") == "vector"
+    assert validate_workload("random") == "random"
 
 
-@pytest.mark.parametrize("value", [None, "", "AICORE", "relu", 1, True, [], {}])
+@pytest.mark.parametrize("value", [None, "", "RANDOM", "relu", 1, True, [], {}])
 def test_validate_workload_rejects_noncanonical_values(value):
     with pytest.raises(
-        ValueError, match="workload must be 'mixed', 'aicore', or 'vector'"
+        ValueError,
+        match="workload must be 'mixed', 'aicore', 'vector', or 'random'",
     ):
         validate_workload(value)
 
