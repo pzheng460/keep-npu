@@ -60,9 +60,8 @@ def test_validate_cli_busy_threshold_rejects_non_canonical_numeric_tokens(
 
 
 def test_validate_cli_workload_accepts_public_values():
-    assert cli._validate_cli_workload("mixed") == "mixed"
-    assert cli._validate_cli_workload("aicore") == "aicore"
-    assert cli._validate_cli_workload("vector") == "vector"
+    for workload in ("mixed", "aicore", "vector", "random"):
+        assert cli._validate_cli_workload(workload) == workload
 
 
 @pytest.mark.parametrize("workload", ["", "AICORE", "relu"])
@@ -172,6 +171,18 @@ def test_blocking_command_accepts_explicit_vector_workload(monkeypatch):
 
     assert result.exit_code == 0
     assert captured["workload"] == "vector"
+
+
+def test_blocking_command_accepts_explicit_random_workload(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        cli, "_run_blocking", lambda *args: captured.setdefault("workload", args[-1])
+    )
+
+    result = runner.invoke(cli.app, ["--workload", "random", "--vram", "1GiB"])
+
+    assert result.exit_code == 0
+    assert captured["workload"] == "random"
 
 
 def test_blocking_command_reports_startup_failure_without_rich_traceback(monkeypatch):

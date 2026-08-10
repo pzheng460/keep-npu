@@ -124,6 +124,22 @@ def test_start_command_uses_rpc(monkeypatch):
     assert port == cli.DEFAULT_SERVICE_PORT
 
 
+def test_start_command_forwards_random_workload(monkeypatch):
+    captured = {}
+
+    def capture_rpc(method, params, host, port):
+        captured["params"] = params
+        return {"job_id": "random-job"}
+
+    monkeypatch.setattr(cli, "_ensure_service_running", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli, "_rpc_call", capture_rpc)
+
+    result = runner.invoke(cli.app, ["start", "--workload", "random", "--vram", "1GiB"])
+
+    assert result.exit_code == 0
+    assert captured["params"]["workload"] == "random"
+
+
 @pytest.mark.parametrize(
     ("rpc_result", "expected_message"),
     [

@@ -54,6 +54,7 @@ from keep_npu.global_npu_controller.global_npu_controller import (
 )
 from keep_npu.single_npu_controller.workload import (
     MIN_MIXED_BYTES,
+    MIN_RANDOM_BYTES,
     validate_workload_vram,
 )
 from keep_npu.utilities.endpoint_validation import validate_endpoint
@@ -139,6 +140,10 @@ MCP_TOOLS: List[Dict[str, Any]] = [
                     "if": {"properties": {"workload": {"const": "aicore"}}},
                     "then": {"properties": {"vram": {"minimum": 1536}}},
                 },
+                {
+                    "if": {"properties": {"workload": {"const": "random"}}},
+                    "then": {"properties": {"vram": {"minimum": MIN_RANDOM_BYTES}}},
+                },
             ],
             "properties": {
                 "npu_ids": {
@@ -154,7 +159,7 @@ MCP_TOOLS: List[Dict[str, Any]] = [
                     "minimum": 4,
                     "maximum": PUBLIC_VRAM_MAX_BYTES,
                     "default": "1GiB",
-                    "description": f"Human-readable VRAM amount or integer bytes to keep; Mixed requires at least {MIN_MIXED_BYTES} bytes, AI Core requires at least 1536 bytes, Vector requires at least 4 bytes, values above 1 PiB are rejected, and internal element counts round up.",
+                    "description": f"Human-readable VRAM amount or integer bytes to keep; Mixed requires at least {MIN_MIXED_BYTES} bytes, AI Core requires at least 1536 bytes, Vector requires at least 4 bytes, Random requires at least {MIN_RANDOM_BYTES} bytes, values above 1 PiB are rejected, and internal element counts round up.",
                 },
                 "interval": {
                     "type": "number",
@@ -172,9 +177,9 @@ MCP_TOOLS: List[Dict[str, Any]] = [
                 },
                 "workload": {
                     "type": "string",
-                    "enum": ["mixed", "aicore", "vector"],
+                    "enum": ["mixed", "aicore", "vector", "random"],
                     "default": DEFAULT_WORKLOAD,
-                    "description": "Mixed Cube, Vector, and HBM pressure by default; aicore and vector select single-engine compatibility modes.",
+                    "description": "Mixed Cube, Vector, and HBM pressure by default; random varies all three through phase-based pressure; aicore and vector select compatibility modes.",
                 },
                 "job_id": {
                     "type": ["string", "null"],
@@ -507,8 +512,9 @@ class KeepNPUServer:
                 values back off when utilization is above this percent or
                 telemetry is unavailable; ``-1`` disables utilization backoff
                 for unconditional keepalive.
-            workload: ``mixed`` by default; explicit ``aicore`` and ``vector``
-                select single-engine compatibility modes.
+            workload: ``mixed`` by default; ``random`` varies Cube, Vector,
+                and HBM pressure in phases; explicit ``aicore`` and ``vector``
+                select compatibility modes.
             job_id: Optional session identifier; a UUID is generated if omitted.
 
         Returns:

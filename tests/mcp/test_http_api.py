@@ -2760,6 +2760,28 @@ def test_http_post_sessions_runtime_type_error_returns_json_500(monkeypatch):
     assert payload["error"]["type"] == "TypeError"
 
 
+def test_http_post_sessions_accepts_random_workload():
+    server = make_server()
+    httpd, thread, base = _start_http_server(server)
+
+    try:
+        status_code, payload = _request_json(
+            "POST",
+            f"{base}/api/sessions",
+            {"job_id": "random-http", "workload": "random", "vram": "1GiB"},
+        )
+        _, status = _request_json("GET", f"{base}/api/sessions/random-http")
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status_code == 200
+    assert payload == {"job_id": "random-http"}
+    assert status["params"]["workload"] == "random"
+
+
 def test_http_post_sessions_runtime_value_error_returns_json_500(monkeypatch):
     server = make_server()
     monkeypatch.setattr(

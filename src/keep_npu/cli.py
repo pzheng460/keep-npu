@@ -1431,8 +1431,8 @@ def main(
         DEFAULT_WORKLOAD,
         "--workload",
         help=(
-            "Keepalive workload: mixed (default, drives Cube, Vector, and HBM), "
-            "aicore, or vector."
+            "Keepalive workload: mixed (default), aicore, vector, or random "
+            "phase-based Cube/Vector/HBM pressure."
         ),
     ),
 ):
@@ -1522,8 +1522,8 @@ def start(
         DEFAULT_WORKLOAD,
         "--workload",
         help=(
-            "Keepalive workload: mixed (default, drives Cube, Vector, and HBM), "
-            "aicore, or vector."
+            "Keepalive workload: mixed (default), aicore, vector, or random "
+            "phase-based Cube/Vector/HBM pressure."
         ),
     ),
     job_id: Optional[str] = typer.Option(

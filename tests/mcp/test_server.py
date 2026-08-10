@@ -230,6 +230,15 @@ def test_start_keep_accepts_explicit_vector_workload():
     assert server._sessions[job_id].controller.workload == "vector"
 
 
+def test_start_keep_accepts_explicit_random_workload():
+    server = make_server()
+
+    job_id = server.start_keep(npu_ids=[0], workload="random", vram="1GiB")["job_id"]
+
+    assert server.status(job_id)["params"]["workload"] == "random"
+    assert server._sessions[job_id].controller.workload == "random"
+
+
 def test_start_keep_defaults_to_eco_safe_busy_threshold():
     server = make_server()
 
@@ -1608,7 +1617,7 @@ def test_mcp_tools_list_exposes_keepnpu_actions():
     assert start_schema["properties"]["interval"]["exclusiveMinimum"] == 0
     assert start_schema["properties"]["busy_threshold"]["default"] == 25
     workload_schema = start_schema["properties"]["workload"]
-    assert workload_schema["enum"] == ["mixed", "aicore", "vector"]
+    assert workload_schema["enum"] == ["mixed", "aicore", "vector", "random"]
     assert workload_schema["default"] == "mixed"
     assert {
         "if": {"properties": {"workload": {"const": "mixed"}}},
@@ -1617,6 +1626,10 @@ def test_mcp_tools_list_exposes_keepnpu_actions():
     assert {
         "if": {"properties": {"workload": {"const": "aicore"}}},
         "then": {"properties": {"vram": {"minimum": 1536}}},
+    } in start_schema["allOf"]
+    assert {
+        "if": {"properties": {"workload": {"const": "random"}}},
+        "then": {"properties": {"vram": {"minimum": 234882560}}},
     } in start_schema["allOf"]
     for tool_name in ("start_keep", "stop_keep", "status"):
         job_id_schema = tools[tool_name]["inputSchema"]["properties"]["job_id"]
