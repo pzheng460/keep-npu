@@ -355,6 +355,7 @@ export default function App() {
                   <option value="mixed">Mixed Cube + Vector + HBM (default)</option>
                   <option value="aicore">AI Core / Cube only</option>
                   <option value="vector">Vector + HBM only</option>
+                  <option value="random">Random workload phases</option>
                 </select>
               </label>
 

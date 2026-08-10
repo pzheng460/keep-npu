@@ -25,6 +25,9 @@ describe("App", () => {
       )
       expect(markup).toContain('<option value="aicore">AI Core / Cube only</option>')
       expect(markup).toContain('<option value="vector">Vector + HBM only</option>')
+      expect(markup).toContain(
+        '<option value="random">Random workload phases</option>'
+      )
     } finally {
       globalThis.window = previousWindow
     }

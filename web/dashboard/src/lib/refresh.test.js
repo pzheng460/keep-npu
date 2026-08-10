@@ -130,6 +130,28 @@ describe("dashboard refresh helpers", () => {
     })
   })
 
+  it.each(["mixed", "aicore", "vector", "random"])(
+    "accepts the public %s session workload",
+    async (workload) => {
+      const requestJson = async (_method, path) =>
+        path === "/api/npus"
+          ? { npus: [] }
+          : {
+              active_jobs: [
+                {
+                  ...validSessionRecord,
+                  params: { ...validSessionRecord.params, workload }
+                }
+              ]
+            }
+
+      const result = await fetchDashboardPayloads(requestJson)
+
+      expect(result.sessions).toHaveLength(1)
+      expect(result.warning).toBeNull()
+    }
+  )
+
   it("keeps telemetry payloads when session refresh fails", async () => {
     const requestJson = async (_method, path) => {
       if (path === "/api/sessions") {

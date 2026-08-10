@@ -83,10 +83,11 @@ describe("numeric parsing", () => {
 })
 
 describe("buildSessionPayload", () => {
-  it("accepts the three public workload modes", () => {
+  it("accepts the four public workload modes", () => {
     expect(parseWorkload("mixed")).toBe("mixed")
     expect(parseWorkload("aicore")).toBe("aicore")
     expect(parseWorkload("vector")).toBe("vector")
+    expect(parseWorkload("random")).toBe("random")
   })
 
   it("builds a normalized payload", () => {
@@ -131,7 +132,7 @@ describe("buildSessionPayload", () => {
         busyThreshold: "25",
         workload: "relu"
       })
-    ).toThrow("Workload must be mixed, aicore, or vector")
+    ).toThrow("Workload must be mixed, aicore, vector, or random")
   })
 })
 
